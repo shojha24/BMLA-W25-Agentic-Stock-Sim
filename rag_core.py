@@ -1,43 +1,87 @@
 import os
-import torch
+import time
 import chromadb
-import uuid
 import numpy as np
 from typing import List, Dict, Any
-from sentence_transformers import SentenceTransformer
+import random
+from google import genai
+from google.genai import types
+from dotenv import load_dotenv
+import concurrent.futures
 
-# Global settings
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+# --- CONFIGURATION ---
+load_dotenv()  # Load environment variables from .env file
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 DB_PATH = "dataset/vector_store"
 
+MODEL_NAME = "gemini-embedding-001"  # Change as needed
+
+
 class EmbeddingManager:
-    def __init__(self, model_name: str = "ibm-granite/granite-embedding-english-r2"): # sentence-transformers/all-MiniLM-L6-v2
+    def __init__(self, project_id: str, location: str, model_name: str = MODEL_NAME):
+        if not project_id or project_id == "YOUR_PROJECT_ID_HERE":
+            raise ValueError("Please set a valid PROJECT_ID")
+            
+        print(f"Connecting to Vertex AI (Project: {project_id}, Loc: {location})...")
+        self.client = genai.Client(vertexai=True, project=project_id, location=location)
         self.model_name = model_name
-        print(f"Loading embedding model '{self.model_name}' on device '{DEVICE}'...")
-        self.model = SentenceTransformer(self.model_name, device=DEVICE)
-        
-        # Optimization: Use FP16 on GPU
-        if DEVICE == 'cuda':
-            print("Model set to use fp16 for speed.")
-            self.model.half()
+        self.api_batch_limit = 100 
 
-    def start_pool(self):
-        """Starts the multi-process pool."""
-        if DEVICE == 'cuda':
-            return self.model.start_multi_process_pool()
-        return None
+    def encode_batch(self, texts: List[str]) -> np.ndarray:
+        chunks = []
+        for i in range(0, len(texts), self.api_batch_limit):
+            chunks.append(texts[i : i + self.api_batch_limit])
 
-    def stop_pool(self, pool):
-        """Stops the multi-process pool."""
-        if pool:
-            self.model.stop_multi_process_pool(pool)
+        all_embeddings = [None] * len(chunks)
 
-    def encode_batch(self, texts: List[str], pool=None) -> np.ndarray:
-        """Encodes a single batch, using the pool if provided."""
-        if pool and DEVICE == 'cuda':
-            return self.model.encode_multi_process(texts, pool, batch_size=512)
-        else:
-            return self.model.encode(texts, show_progress_bar=False, batch_size=512)
+        # MATCH: 5000 docs / 100 limit = 50 chunks.
+        # Set workers to 50 to process the entire file batch in one wave.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+            future_to_index = {
+                executor.submit(self._call_api_with_retry, chunk): i 
+                for i, chunk in enumerate(chunks)
+            }
+            
+            for future in concurrent.futures.as_completed(future_to_index):
+                index = future_to_index[future]
+                try:
+                    batch_embeddings = future.result()
+                    all_embeddings[index] = batch_embeddings
+                except Exception as e:
+                    print(f"Chunk {index} failed permanently: {e}")
+                    # Fill with zero vectors to avoid crashing, but log heavily
+                    # In a production system, you might want to retry differently
+                    zero_vec = [0.0] * 768 
+                    all_embeddings[index] = [zero_vec for _ in range(len(chunks[index]))]
+
+        # 3. Flatten the list of lists
+        flat_list = [item for sublist in all_embeddings for item in sublist]
+        return np.array(flat_list)
+
+    def _call_api_with_retry(self, chunk, retries=5):
+        for attempt in range(retries):
+            try:
+                response = self.client.models.embed_content(
+                    model=self.model_name,
+                    contents=chunk,
+                    config=types.EmbedContentConfig(
+                        task_type="RETRIEVAL_DOCUMENT",
+                        title="Financial News" 
+                    )
+                )
+                return [e.values for e in response.embeddings]
+            except Exception as e:
+                # If we hit a rate limit (429), sleep longer
+                if "429" in str(e) or "Resource exhausted" in str(e):
+                    base_sleep = 2 * (attempt + 1)
+                    # FIX: Use random jitter instead of 'index'
+                    jitter = random.uniform(0.1, 1.0) 
+                    time.sleep(base_sleep + jitter)
+                elif attempt == retries - 1:
+                    raise e
+                else:
+                    time.sleep(1)
+
 
 class VectorStore:
     def __init__(self, collection_name: str = "headlines", persist_directory: str = DB_PATH):
@@ -50,9 +94,7 @@ class VectorStore:
         )
 
     def add_documents(self, documents: List[Any], embeddings: np.ndarray):
-        # Generate IDs based on actual content to avoid duplicates if re-run (optional)
-        # For now, we use UUIDs but ensuring we don't crash on duplicates
-        ids = [f"doc_{uuid.uuid4()}" for _ in range(len(documents))]
+        ids = [doc.id for doc in documents]
         metadatas = [doc.metadata for doc in documents]
         texts = [doc.page_content for doc in documents]
         embeddings_list = embeddings.tolist()
@@ -70,9 +112,20 @@ class RAGRetriever:
         self.embedding_manager = embedding_manager
 
     def retrieve(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        query_embedding = self.embedding_manager.encode_batch([query])[0]
+        # Embed the query
+        response = self.embedding_manager.client.models.embed_content(
+            model=self.embedding_manager.model_name,
+            contents=query,
+            config=types.EmbedContentConfig(
+                task_type="RETRIEVAL_QUERY"
+            )
+        )
+        
+        # Extract single embedding
+        query_embedding = response.embeddings[0].values
+        
         results = self.vector_store.collection.query(
-            query_embeddings=[query_embedding.tolist()],
+            query_embeddings=[query_embedding],
             n_results=top_k
         )
         

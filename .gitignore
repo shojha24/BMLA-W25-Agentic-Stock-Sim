@@ -207,5 +207,6 @@ marimo/_lsp/
 __marimo__/
 
 dataset/analyst_ratings_processed.csv
+dataset/analyst_ratings_consolidated.csv
 
 dataset/vector_store/
