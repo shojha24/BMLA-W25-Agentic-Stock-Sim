@@ -89,10 +89,10 @@ class RAGSearcher:
         
         bm25_results_ids = []
         for item in bm25_raw_results[0]:
-            # --- CRITICAL FIX: UNWRAP THE DICTIONARY ---
+            # --- UNWRAP THE DICTIONARY ---
             if isinstance(item, dict):
-                # We extract 'text' because that contains your MD5 hash
-                doc_id = item.get('text') 
+                # We extract 'doc_id' because that contains MD5 hash
+                doc_id = item.get('doc_id')
                 if doc_id:
                     bm25_results_ids.append(doc_id)
             else:
@@ -102,15 +102,20 @@ class RAGSearcher:
         bm25_time = time.perf_counter() - bm25_start
 
         # --- 2. RUN VECTOR SEARCH ---
+
         vec_start = time.perf_counter()
         query_emb = self.embed_query(query)
+        api_time = time.perf_counter() - vec_start  # Time for embedding API call
         
         vector_resp = self.vector_store.collection.query(
             query_embeddings=[query_emb],
             n_results=top_k
         )
         vector_results_ids = vector_resp['ids'][0]
-        vec_time = time.perf_counter() - vec_start
+        vec_time = time.perf_counter() - vec_start # Total time for vector search
+        db_time = vec_time - api_time # Time for Chroma search only
+
+        print(f"DEBUG TIMING: API Call: {api_time:.4f}s | Chroma Search: {db_time:.4f}s")
 
         # --- 3. COMPUTE RRF (Reciprocal Rank Fusion) ---
         rrf_scores = {}
