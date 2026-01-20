@@ -1,39 +1,69 @@
-from rag_core import EmbeddingManager, VectorStore, RAGRetriever
+import os
+from google import genai
+from google.genai import types
+from rag_core import VectorStore
 
 # --- CONFIGURATION ---
-# Match these to what you used in ingest.py
-PROJECT_ID = "gen-lang-client-0726681372"  # <--- PASTE YOUR PROJECT ID HERE
-LOCATION = "us-central1"
+API_KEY = os.getenv("GOOGLE_API_KEY")
+MODEL_NAME = "models/gemini-embedding-001"
+
+class FreeTierEmbeddingManager:
+    def __init__(self, api_key, model_name):
+        """
+        Initializes the new Google GenAI Client (v1.0)
+        """
+        if not api_key or "YOUR_API_KEY" in api_key:
+            raise ValueError("Invalid API Key. Please set your GOOGLE_API_KEY.")
+            
+        # The new SDK uses a Client object
+        self.client = genai.Client(api_key=api_key)
+        self.model_name = model_name
+
+    def encode_query(self, text):
+        """
+        Embeds a single query string using the Free Tier limits.
+        """
+        try:
+            # New SDK Syntax
+            response = self.client.models.embed_content(
+                model=self.model_name,
+                contents=text,
+                config=types.EmbedContentConfig(
+                    task_type="RETRIEVAL_QUERY" # Vital for accurate search results
+                )
+            )
+            
+            # Access the vector. The new SDK returns an object, not a dict.
+            return response.embeddings[0].values
+            
+        except Exception as e:
+            print(f"\nEmbedding Error: {e}")
+            return []
 
 def main():
-    print("Initializing RAG System...")
+    print("Initializing RAG System (Free Tier via google-genai)...")
     
-    # 1. Load existing resources
-    # FIX: Pass the required Project ID and Location to the manager
     try:
-        embedding_manager = EmbeddingManager(
-            project_id=PROJECT_ID,
-            location=LOCATION
-        )
+        embedding_manager = FreeTierEmbeddingManager(API_KEY, MODEL_NAME)
     except Exception as e:
-        print(f"Error initializing Vertex AI: {e}")
-        print("Did you forget to set the PROJECT_ID in search.py?")
+        print(e)
+        return
+    
+    # 1. Connect to Database
+    # We rely on rag_core only for the VectorStore class to access ChromaDB
+    try:
+        vector_store = VectorStore() 
+        count = vector_store.collection.count()
+        print(f"Connected to database. Total documents: {count}")
+    except Exception as e:
+        print(f"Database Error: {e}")
         return
 
-    vector_store = VectorStore() 
-    
-    # 2. Check if data exists
-    count = vector_store.collection.count()
-    print(f"Connected to database. Total documents: {count}")
-    
     if count == 0:
-        print("Warning: Vector store is empty! Please run 'ingest.py' first.")
+        print("Warning: Vector store is empty! Run ingest.py first.")
         return
 
-    # 3. Initialize Retriever
-    retriever = RAGRetriever(vector_store, embedding_manager)
-    
-    # 4. Interactive Loop
+    # 2. Search Loop
     print("\nSystem Ready. Type 'exit' to quit.")
     while True:
         query = input("\nEnter query: ")
@@ -41,17 +71,31 @@ def main():
             break
             
         try:
-            results = retriever.retrieve(query, top_k=10)
+            # Step A: Embed the query (Free Tier)
+            query_embedding = embedding_manager.encode_query(query)
+            
+            if not query_embedding:
+                print("Failed to generate embedding. Check API quota?")
+                continue
+            
+            # Step B: Search ChromaDB (Local)
+            results = vector_store.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=10
+            )
             
             print(f"\n--- Results for: {query} ---")
-            if not results:
-                print("No relevant results found.")
-            
-            for res in results:
-                # Handle cases where metadata might be missing keys to prevent crashes
-                date = res['metadata'].get('date', 'N/A')
-                stock = res['metadata'].get('stock', 'N/A')
-                print(f"[{date}] {stock}: {res['content']}")
+            if results['documents']:
+                for i in range(len(results['documents'][0])):
+                    # safely get metadata
+                    meta = results['metadatas'][0][i] or {}
+                    content = results['documents'][0][i]
+                    date = meta.get('date', 'N/A')
+                    stock = meta.get('stock', 'N/A')
+                    
+                    print(f"[{date}] {stock}: {content}")
+            else:
+                print("No results found.")
                 
         except Exception as e:
             print(f"Search failed: {e}")
