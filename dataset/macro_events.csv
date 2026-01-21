@@ -1,0 +1,136 @@
+date,stock,title
+2009-01-20 12:00:00+00:00,GOVT,Barack Obama inaugurated as 44th President amidst deepening financial crisis.
+2009-02-10 11:00:00+00:00,GOVT,Treasury Sec Geithner unveils Financial Stability Plan; markets drop 4% on lack of detail.
+2009-02-17 10:00:00+00:00,GOVT,Obama signs $787 Billion ARRA Stimulus Act into law.
+2009-02-27 09:00:00+00:00,GOVT,US government takes 36% equity stake in Citigroup to prevent failure.
+2009-03-06 16:00:00+00:00,MACRO,S&P 500 hits intraday low of 666.79; marks the generational bottom of the GFC bear market.
+2009-03-18 14:15:00+00:00,FED,Fed shocks markets: Announces purchase of $300B Treasuries and expands MBS buying to $1.25T (QE1 Expansion).
+2009-04-02 10:00:00+00:00,MACRO,G20 Summit in London: Leaders agree to $1.1T global stimulus package; signals unified crisis response.
+2009-05-07 16:00:00+00:00,MACRO,Stress Test Results: 10 of 19 banks need $75B capital; results 'better than feared' and ignite bank rally.
+2009-06-01 08:00:00+00:00,MACRO,General Motors files for Chapter 11 bankruptcy protection.
+2009-11-04 14:15:00+00:00,FED,FOMC Statement: Fed introduces 'extended period' language regarding low rates.
+2009-12-16 14:15:00+00:00,FED,Fed notes economic activity has 'picked up' but unemployment remains concern.
+2010-01-19 09:00:00+00:00,GOVT,"Republican Scott Brown wins Ted Kennedy's Senate seat, jeopardizing healthcare reform legislation."
+2010-03-23 11:00:00+00:00,GOVT,Obama signs Affordable Care Act (Obamacare) into law; healthcare stocks volatile.
+2010-04-27 09:00:00+00:00,ECB,S&P downgrades Greece to 'Junk' (BB+) and Portugal by two notches; contagion fears explode.
+2010-05-02 00:00:00+00:00,ECB,Eurozone/IMF agree to €110B Greek bailout package; demands severe austerity.
+2010-05-06 14:45:00+00:00,MACRO,The Flash Crash: Dow plunges 998.5 points (9%) in minutes; Accenture trades at penny; markets recover by close.
+2010-05-09 18:00:00+00:00,ECB,EU announces €750B European Financial Stability Facility (EFSF) to defend the Euro.
+2010-06-04 08:30:00+00:00,MACRO,Non-farm payrolls disappoint due to census hiring end; double-dip recession fears grow.
+2010-07-21 11:00:00+00:00,GOVT,Obama signs Dodd-Frank Wall Street Reform Act; mandates Volcker Rule and derivatives clearing.
+2010-08-27 10:00:00+00:00,FED,Jackson Hole: Bernanke says Fed 'prepared to provide additional accommodation' (Hinting at QE2).
+2010-11-02 20:00:00+00:00,GOVT,US Midterms: Republicans retake House in landslide; signals gridlock for remainder of Obama term.
+2010-11-03 14:15:00+00:00,FED,Fed launches QE2: Will purchase $600B of Treasuries to lower long-term yields.
+2011-03-11 06:00:00+00:00,MACRO,Tohoku Earthquake/Tsunami strikes Japan; Fukushima nuclear disaster halts global supply chains.
+2011-04-18 09:00:00+00:00,MACRO,S&P puts US 'AAA' credit rating on negative outlook citing political gridlock.
+2011-05-02 04:00:00+00:00,GOVT,Osama Bin Laden killed by US forces; geopolitical risk premium briefly dips.
+2011-08-02 12:00:00+00:00,GOVT,Debt Ceiling Crisis ends: Budget Control Act passed hours before default; creates 'Sequester'.
+2011-08-04 09:00:00+00:00,ECB,ECB restarts bond buying program to support Italy and Spain yields.
+2011-08-05 20:00:00+00:00,MACRO,S&P Downgrades US Credit Rating to AA+ from AAA; first time in history.
+2011-08-08 09:30:00+00:00,MACRO,Black Monday 2011: Dow drops 634 points (5.5%) on downgrade fallout.
+2011-08-09 14:15:00+00:00,FED,Fed FOMC: Pledges to keep rates low through 'mid-2013'; first explicit calendar guidance.
+2011-09-06 09:00:00+00:00,MACRO,Swiss National Bank sets floor of 1.20 francs per euro to stop currency appreciation.
+2011-09-21 14:15:00+00:00,FED,Fed announces 'Operation Twist': Swapping $400B short-term bonds for long-term to flatten curve.
+2011-10-31 08:00:00+00:00,MACRO,MF Global files for bankruptcy after failed Eurozone debt bets.
+2011-11-30 08:00:00+00:00,FED,Global Central Banks coordinate to slash dollar swap line rates; liquidity injection sparks rally.
+2012-01-13 16:00:00+00:00,ECB,S&P downgrades 9 Eurozone nations; France loses AAA status.
+2012-05-06 18:00:00+00:00,ECB,Hollande wins French election; Greek elections inconclusive; Euro breakup fears peak.
+2012-05-10 16:00:00+00:00,MACRO,JPMorgan 'London Whale' trading loss revealed ($2B initially); bank stocks hit.
+2012-06-28 10:00:00+00:00,GOVT,Supreme Court upholds Obamacare individual mandate as a tax.
+2012-07-26 08:30:00+00:00,ECB,"Mario Draghi: 'Within our mandate, the ECB is ready to do whatever it takes to preserve the euro.'"
+2012-09-06 13:45:00+00:00,ECB,ECB announces OMT: Unlimited bond-buying program for troubled sovereigns.
+2012-09-13 14:00:00+00:00,FED,Fed announces QE3: Open-ended purchase of $40B MBS per month.
+2012-11-06 20:00:00+00:00,GOVT,Obama re-elected; markets immediately focus on looming 'Fiscal Cliff' tax hikes.
+2012-12-12 14:00:00+00:00,FED,Fed expands QE3: Adds $45B/month Treasuries (total $85B/month); sets 6.5% unemployment threshold.
+2013-01-01 02:00:00+00:00,GOVT,Senate passes Fiscal Cliff deal (ATRA) averting recessionary tax hikes.
+2013-03-16 09:00:00+00:00,ECB,Cyprus Bailout: Deal includes unprecedented tax on bank deposits; gold plunges.
+2013-04-15 11:00:00+00:00,MACRO,Gold crashes 9% (biggest drop in 30 years) on fears of central bank selling and Cyprus.
+2013-05-22 10:00:00+00:00,FED,Bernanke Testimony: Says Fed could 'take a step down' in pacing purchases (Taper Tantrum begins).
+2013-06-19 14:30:00+00:00,FED,Bernanke Presser: Lays out Taper roadmap to end QE by mid-2014; 10yr yield spikes to 2.5%.
+2013-08-22 09:00:00+00:00,MACRO,NASDAQ flash freeze: Trading halted for 3 hours due to technical glitch.
+2013-09-18 14:00:00+00:00,FED,Fed Surprise: No Taper. FOMC votes to maintain $85B/month pacing; markets rally hard.
+2013-10-01 00:00:00+00:00,GOVT,US Government Shutdown begins (lasts 16 days) over funding dispute.
+2013-11-07 08:30:00+00:00,MACRO,"Twitter IPO: TWTR opens at $45.10, signaling return of tech euphoria."
+2013-12-18 14:00:00+00:00,FED,The Taper Begins: Fed officially cuts monthly purchases by $10B to $75B; markets take it in stride.
+2014-01-29 14:00:00+00:00,FED,Fed continues Taper: Reduces monthly bond purchases by $10B to $65B.
+2014-02-03 09:00:00+00:00,FED,Janet Yellen sworn in as Fed Chair; first woman to lead the central bank.
+2014-03-19 14:00:00+00:00,FED,Yellen's first FOMC: Drops 6.5% unemployment threshold; 'dots' plot signals rate hikes in 2015.
+2014-06-05 07:45:00+00:00,ECB,ECB cuts deposit rate to negative (-0.10%) for first time; launches targeted LTROs.
+2014-09-18 00:00:00+00:00,MACRO,Scotland Independence Vote: Scots vote 'No' (55-45) to stay in UK; relief rally in Pound/FTSE.
+2014-09-19 09:00:00+00:00,MACRO,Alibaba IPO: BABA opens massive; largest IPO in history at the time ($25B raised).
+2014-10-15 09:30:00+00:00,MACRO,Treasury Flash Rally: 10-year yield plunges 34bps intraday on growth fears; market fragility exposed.
+2014-10-29 14:00:00+00:00,FED,End of an Era: Fed concludes QE3 bond-buying program; keeps 'considerable time' rate language.
+2014-10-31 02:00:00+00:00,MACRO,Bank of Japan shocks markets: Expands QQE stimulus significantly; Yen crashes.
+2014-11-27 10:00:00+00:00,MACRO,OPEC Meeting: Saudi Arabia blocks production cuts despite crashing prices; Oil dives below $70 (start of Oil Depression).
+2014-12-17 14:00:00+00:00,FED,Fed drops 'considerable time' phrase; replaces with 'patient' regarding rate hikes.
+2015-01-15 09:30:00+00:00,MACRO,Swiss National Bank Shock: Unexpectedly unpegs Franc from Euro; CHF soars 30% in minutes; brokers blow up.
+2015-01-22 08:30:00+00:00,ECB,ECB launches full-blown QE: Will buy €60B bonds per month to fight deflation.
+2015-03-18 14:00:00+00:00,FED,Fed removes 'patient' from statement; opens door for rate hikes data-dependent.
+2015-06-12 00:00:00+00:00,MACRO,Shanghai Composite Bubble peaks at 5178; begins 40% crash over next two months.
+2015-07-05 00:00:00+00:00,MACRO,Greek Referendum: Greeks vote 'No' to bailout terms; Grexit fears peak before eventual capitulation.
+2015-08-11 02:00:00+00:00,MACRO,China Devaluation: PBOC surprisingly devalues Yuan (Renminbi) almost 2%; global panic ensues.
+2015-08-24 09:30:00+00:00,MACRO,"Black Monday 2015: Dow falls 1,000 points at open; VIX hits 53; AAPL halts trading; 'Flash Crash' in ETFs."
+2015-09-17 14:00:00+00:00,FED,Fed holds rates steady: Cites 'Global economic and financial developments' (China/Market Volatility).
+2015-09-28 09:00:00+00:00,MACRO,Glencore crashes 29% in one day; fears of commodity trader insolvency/Lehman moment.
+2015-12-16 14:00:00+00:00,FED,Liftoff: Fed raises rates by 0.25% (0.25-0.50%); first hike since 2006; signals 4 hikes for 2016.
+2016-01-04 09:30:00+00:00,MACRO,Worst New Year Start: China circuit breakers halt trading twice in a week; S&P 500 down 6%.
+2016-01-29 02:00:00+00:00,MACRO,Bank of Japan adopts Negative Interest Rates (NIRP); markets react with confusion and volatility.
+2016-02-11 10:00:00+00:00,MACRO,Oil Bottom: WTI Crude hits $26.21/barrel; fears of US energy bond defaults peak; markets bottom.
+2016-03-16 14:00:00+00:00,FED,Fed Dovish Shift: Reduces 2016 hike forecast from 4 to 2 due to global risks; USD weakens.
+2016-06-23 20:00:00+00:00,MACRO,Brexit Vote: UK shocks world voting to Leave EU; GBP crashes to 30-year low; Nikkei triggers circuit breaker.
+2016-09-21 02:00:00+00:00,MACRO,BOJ announces 'Yield Curve Control': Pledges to pin 10yr JGB yield at 0%.
+2016-11-08 23:00:00+00:00,MACRO,US Election Night: Trump lead causes S&P futures to hit limit down (-5%); Mexico Peso crashes.
+2016-11-09 09:30:00+00:00,MACRO,"The Trump Rally: Markets reverse losses to close up; focus shifts to deregulation, tax cuts, and infrastructure."
+2016-11-30 09:00:00+00:00,MACRO,OPEC Deal: Cartel agrees to first output cut in 8 years; Oil rallies back toward $50.
+2016-12-14 14:00:00+00:00,FED,Fed hikes rates to 0.50-0.75%; hawkish 'dot plot' forecasts 3 hikes in 2017.
+2017-01-20 12:00:00+00:00,GOVT,Trump Inauguration: 'America First' speech; focus on trade protectionism starts.
+2017-03-15 14:00:00+00:00,FED,Fed hikes rates to 0.75-1.00%; markets rally as hike was well-telegraphed.
+2017-05-18 09:00:00+00:00,MACRO,Comey Memo/Mueller: Markets dip on political uncertainty; 'volatility selling' strategy dominates year.
+2017-06-14 14:00:00+00:00,FED,Fed hikes rates to 1.00-1.25%; Yellen announces plan for Quantitative Tightening (QT).
+2017-09-20 14:00:00+00:00,FED,Fed announces start of Balance Sheet Runoff (QT) in October; 'watching paint dry'.
+2017-11-02 15:00:00+00:00,FED,"Trump nominates Jerome Powell as next Fed Chair, replacing Yellen."
+2017-12-10 17:00:00+00:00,MACRO,Bitcoin Futures launch on CBOE; Bitcoin hits $20k week later before crashing.
+2017-12-13 14:00:00+00:00,FED,Fed hikes rates to 1.25-1.50%.
+2017-12-22 10:00:00+00:00,MACRO,Tax Cuts and Jobs Act signed: Corporate tax rate slashed from 35% to 21%; massive earnings boost expected.
+2018-01-22 10:00:00+00:00,TRADE,Trump imposes tariffs on solar panels (30%) and washing machines (20%); first protectionist shot fired.
+2018-02-05 16:00:00+00:00,MACRO,Volmageddon: S&P drops 4%; VIX spikes 115% (record); XIV volatility note implodes; era of low vol ends.
+2018-03-01 11:00:00+00:00,TRADE,Trump announces 25% tariff on steel and 10% on aluminum imports from all countries.
+2018-03-22 12:30:00+00:00,TRADE,Trump targets China: Announces tariffs on $60B goods (Section 301) for IP theft; China vows retaliation.
+2018-06-15 10:00:00+00:00,TRADE,US finalizes 25% tariffs on $50B Chinese goods; China retaliates in kind immediately.
+2018-07-06 00:01:00+00:00,TRADE,Trade War Begins: US tariffs on $34B Chinese goods (List 1) go into effect.
+2018-08-23 00:01:00+00:00,TRADE,Round 2: US imposes tariffs on $16B more Chinese goods (List 2); China matches.
+2018-09-17 17:00:00+00:00,TRADE,Escalation: US announces 10% tariffs on $200B Chinese goods (List 3); rising to 25% on Jan 1.
+2018-10-03 10:00:00+00:00,FED,Powell Error: Says rates are 'a long way from neutral'; 10yr yield breaks 3.20%; Tech stocks crash.
+2018-12-01 18:00:00+00:00,TRADE,G20 Buenos Aires: Trump and Xi agree to 90-day truce; tariff hike paused.
+2018-12-19 14:00:00+00:00,FED,Fed Hikes into Weakness: Raises rates to 2.25-2.50%; Powell says balance sheet runoff on 'autopilot'.
+2018-12-24 13:00:00+00:00,MACRO,Christmas Eve Massacre: S&P 500 enters bear market (-20% from high); worst Christmas Eve trading ever.
+2019-01-04 10:00:00+00:00,FED,The Powell Pivot: Powell walks back 'autopilot' comment; says Fed will be 'patient' and flexible.
+2019-03-20 14:00:00+00:00,FED,Fed ends hiking cycle; announces plan to stop Balance Sheet runoff in September.
+2019-05-05 12:00:00+00:00,TRADE,Trump Tweet: Threatens to raise tariffs on $200B goods to 25% immediately; truce broken.
+2019-05-15 10:00:00+00:00,TRADE,Tech War: US places Huawei on 'Entity List'; bans sale of US chips/software to them.
+2019-07-31 14:00:00+00:00,FED,Insurance Cut: Fed cuts rates 0.25% (first since 2008); Powell calls it 'mid-cycle adjustment'.
+2019-08-01 13:30:00+00:00,TRADE,Trump tweets 10% tariff on remaining $300B Chinese imports (List 4) starting Sept 1.
+2019-08-05 09:00:00+00:00,TRADE,Currency War: China halts ag purchases; Yuan falls below 7; US labels China 'Currency Manipulator'.
+2019-08-14 06:00:00+00:00,MACRO,Inversion: 2yr/10yr yield curve inverts; classic recession signal triggers 800 point Dow drop.
+2019-09-17 09:00:00+00:00,FED,Repo Crisis: Overnight repo rates spike to 10%; Fed forced to inject billions in liquidity.
+2019-10-11 15:00:00+00:00,TRADE,Handshake Deal: Trump announces 'Phase One' trade deal reached in principle.
+2019-10-30 14:00:00+00:00,FED,Fed cuts rates 0.25% (3rd cut); signals pause; liquidity injections ('Not QE') continue.
+2019-12-13 09:00:00+00:00,TRADE,Phase One Agreement: Text finalized; Dec 15 tariffs cancelled; tariff rollbacks announced.
+2020-01-15 11:00:00+00:00,TRADE,Signing Ceremony: US and China sign Phase One Trade Agreement at White House.
+2020-01-23 00:00:00+00:00,MACRO,Wuhan Lockdown: China quarantines city of 11 million to contain novel coronavirus.
+2020-02-19 16:00:00+00:00,MACRO,Market Top: S&P 500 hits all-time high of 3386 before virus reality sets in.
+2020-02-24 09:30:00+00:00,MACRO,"The Awakening: Dow drops 1,000 points on news of virus spread in Italy/Korea."
+2020-03-03 10:00:00+00:00,FED,Emergency Cut: Fed slashes rates 0.50% between meetings; markets rally then fade.
+2020-03-09 09:35:00+00:00,MACRO,Black Monday I: S&P 500 triggers Circuit Breaker (7% drop) at open; Oil crashes 24% on Saudi Price War.
+2020-03-12 09:35:00+00:00,MACRO,Black Thursday: S&P 500 triggers Circuit Breaker again; Dow drops 10% (worst since 1987).
+2020-03-15 17:00:00+00:00,FED,Fed 'All In': Sunday emergency cut to 0%; launches $700B QE; swap lines opened.
+2020-03-16 09:30:00+00:00,MACRO,Black Monday II: Circuit Breaker triggered again despite Fed action; S&P falls 12%.
+2020-03-18 11:00:00+00:00,MACRO,"Liquidation: Bill Ackman 'Hell is coming' interview; panic selling in everything (Gold, Bonds, Stocks)."
+2020-03-23 08:00:00+00:00,FED,Unlimited QE: Fed announces open-ended bond buying; adds Corp Bond facilities (LQD/HYG).
+2020-03-23 16:00:00+00:00,MACRO,The Bottom: S&P 500 closes at 2237; Fed backstop finally holds.
+2020-03-27 12:00:00+00:00,MACRO,Stimulus: Trump signs $2.2 Trillion CARES Act; checks to households and PPP loans.
+2020-04-09 08:30:00+00:00,FED,Main Street Lending: Fed unveils $2.3T in new loans; explicitly buys High Yield (Junk) bonds.
+2020-04-20 14:00:00+00:00,MACRO,Negative Oil: WTI Crude futures expire at -$37.63 per barrel; chaos in energy markets.
+2020-08-27 09:00:00+00:00,FED,Jackson Hole: Powell announces 'Average Inflation Targeting'; rates to stay lower for longer.
+2020-09-03 12:00:00+00:00,MACRO,Softbank Whale: Tech stocks correct as massive options buying by Softbank is revealed.
+2020-11-09 06:00:00+00:00,MACRO,"Pfizer Vaccine: PFE announces 90% efficacy; 'Stay at Home' stocks crash, 'Reopen' stocks soar."

@@ -331,3 +331,24 @@ if __name__ == "__main__":
         stock_list=["NVDA", "AMD"], 
         use_decay=True
     )
+    # "It is June 15th, 2013. The market is panicking about the Fed. How are banks looking?"
+    searcher.search(
+        query="federal reserve tapering bond buying yields",
+        cutoff_date="2013-06-15",
+        stock_list=["JPM", "BAC", "C", "GS", "FED", "TRADE", "MACRO"],
+        use_decay=True
+    )
+    # "It is August 24th, 2015 (Black Monday). China markets are crashing. Who is exposed?"
+    searcher.search(
+        query="China economic slowdown yuan devaluation sales",
+        cutoff_date="2015-08-24",
+        stock_list=["AAPL", "YUM", "CAT", "GM"],
+        use_decay=True
+    )
+    # "It is April 15th, 2019. Disney just unveiled their streaming service. Is Netflix in trouble?"
+    searcher.search(
+        query="streaming service launch subscriber growth competition",
+        cutoff_date="2019-04-15",
+        stock_list=["NFLX", "DIS", "AAPL", "CMCSA"],
+        use_decay=True
+    )
