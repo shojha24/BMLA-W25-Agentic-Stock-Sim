@@ -1,0 +1,19 @@
+{
+    "cash_usd": 10000.0,
+    "positions": {
+      "QQQ": { "qty": 10, "avg_price": 390.0 },
+      "SPY": { "qty": 0, "avg_price": 0.0 },
+      "TLT": { "qty": 0, "avg_price": 0.0 },
+      "GLD": { "qty": 0, "avg_price": 0.0 },
+      "XLE": { "qty": 0, "avg_price": 0.0 },
+      "UUP": { "qty": 0, "avg_price": 0.0 }
+    },
+    "prices": {
+      "QQQ": 400.0,
+      "SPY": 520.0,
+      "TLT": 95.0,
+      "GLD": 190.0,
+      "XLE": 92.0,
+      "UUP": 28.0
+    }
+  }
