@@ -1,0 +1,16 @@
+{
+    "timestamp": "2026-01-17T19:53:00Z",
+    "news_digest": [
+      {
+        "news_id": "news_1",
+        "time": "2026-01-17T19:45:00Z",
+        "source": "MockWire",
+        "headline": "CPI hotter-than-expected; yields jump",
+        "summary": "Inflation surprised to the upside and Treasury yields moved higher, pressuring risk assets.",
+        "tickers_mentioned": ["SPY", "QQQ", "TLT"],
+        "macro_tags": ["CPI", "YIELDS", "RISK_OFF"],
+        "sentiment": "BEARISH",
+        "confidence": 0.8
+      }
+    ]
+  }
