@@ -40,8 +40,8 @@ def main() -> None:
 
     parser.add_argument("--mode", choices=["llm", "hardcoded"], default="llm",
                         help="Use OpenRouter LLM agent or hardcoded baseline.")
-    parser.add_argument("--model", default="xiaomi/mimo-v2-flash:free",
-                        help="OpenRouter model id (e.g. xiaomi/mimo-v2-flash:free)")
+    parser.add_argument("--model", default="stepfun/step-3.5-flash:free",
+                        help="OpenRouter model id (e.g. stepfun/step-3.5-flash:free)")
 
     args = parser.parse_args()
 
@@ -60,6 +60,7 @@ def main() -> None:
         from agents.macro_econ import MacroEconomistLLMAgent
 
         key = os.getenv("OPENROUTER_API_KEY")
+        print("Ready to run LLM agent with API key present:", bool(key))
         client = OpenRouterClient(api_key=key, site_url="http://localhost", app_title="Sentiment Alpha")
         agent = MacroEconomistLLMAgent(client=client, model=args.model)
         out = agent.run(digest=digest, state=state)
