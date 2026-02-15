@@ -299,7 +299,8 @@ class BacktestSearcher:
             if ptr_rec >= len(top_recent) and ptr_hist >= len(top_history):
                 break
 
-        # --- 6. DISPLAY ---
+        # --- 6. RETURN ---
+        ''' # DEBUG PRINTING (Optional) - Shows the final interleaved results with labels and dates
         print("\n" + "="*60)
         print(f"QUERY: {query}")
         print("="*60)
@@ -319,36 +320,61 @@ class BacktestSearcher:
                     label = "RECENT    "
                 
                 print(f"{i+1}. [{label}] [{date_display}] {text}")
+        '''
+
+        output_lines = []
+        output_lines.append("=" * 60)
+        output_lines.append(f"QUERY: {query}")
+        output_lines.append("=" * 60)
+        output_lines.append("\n--- HYBRID RESULTS (Barbell Strategy) ---")
+        
+        for i, doc_id in enumerate(final_results):
+            data = content_map.get(doc_id)
+            if data:
+                # Note: Passing this to an LLM, so using full text, vs for printing where we truncated to 85 chars
+                text = data['text'].replace("\n", " ")
+                meta = data['metadata']
+                date_display = meta.get('date', 'N/A')
+                
+                # Label the output so you know WHY it was picked
+                label = "HISTORICAL"
+                if doc_id in top_recent[:half_k+2]: # loose check
+                    label = "RECENT    "
+                
+                output_lines.append(f"{i+1}. [{label}] [{date_display}] {text}")
+
+        # Return the final aggregated string
+        return "\n".join(output_lines)
 
 if __name__ == "__main__":
     searcher = BacktestSearcher()
     
     # Example Backtest Scenario
     # "It is Jan 1st, 2019. I am trading NVDA. What is the news?"
-    searcher.search(
+    print(searcher.search(
         query="graphics card demand", 
         cutoff_date="2019-01-01", 
         stock_list=["NVDA", "AMD"], 
         use_decay=True
-    )
+    ))
     # "It is June 15th, 2013. The market is panicking about the Fed. How are banks looking?"
-    searcher.search(
+    print(searcher.search(
         query="federal reserve tapering bond buying yields",
         cutoff_date="2013-06-15",
         stock_list=["JPM", "BAC", "C", "GS", "FED", "TRADE", "MACRO"],
         use_decay=True
-    )
+    ))
     # "It is August 24th, 2015 (Black Monday). China markets are crashing. Who is exposed?"
-    searcher.search(
+    print(searcher.search(
         query="China economic slowdown yuan devaluation sales",
         cutoff_date="2015-08-24",
         stock_list=["AAPL", "YUM", "CAT", "GM"],
         use_decay=True
-    )
+    ))
     # "It is April 15th, 2019. Disney just unveiled their streaming service. Is Netflix in trouble?"
-    searcher.search(
+    print(searcher.search(
         query="streaming service launch subscriber growth competition",
         cutoff_date="2019-04-15",
         stock_list=["NFLX", "DIS", "AAPL", "CMCSA"],
         use_decay=True
-    )
+    ))
