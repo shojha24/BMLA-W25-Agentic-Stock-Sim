@@ -1,10 +1,11 @@
 from __future__ import annotations
 import json
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from core.types import Digest, State, AgentOutput
 from agents.base import BaseAgent
 from llm.openrouter_client import OpenRouterClient
+from tools.rag import RAGNewsTool
 
 
 MACRO_SYSTEM = (
@@ -14,7 +15,7 @@ MACRO_SYSTEM = (
 
 MACRO_DEVELOPER = """
 Persona: Macro Economist (rates/inflation/growth/FX/commodities). Prefer liquid ETFs & mega-caps. Avoid illiquid names.
-Task: Given (1) a 15-minute news digest and (2) current portfolio state, output a SINGLE JSON object with:
+Task: Given (1) a 15-minute news digest, (2) current portfolio state, and (3) optional rag_context with historically similar news, output a SINGLE JSON object with:
 - agent_name, persona, timestamp, decision
 - market_view: risk_regime (RISK_ON/RISK_OFF/NEUTRAL), confidence (0..1), summary, key_drivers (list of strings referencing news_id)
 - signals: list of objects summarizing each news item and interpretation (include news_id, macro_tags, sentiment, confidence)
@@ -24,6 +25,7 @@ Task: Given (1) a 15-minute news digest and (2) current portfolio state, output 
 Hard constraints:
 - Use only tickers that appear in state.prices (do not invent tickers).
 - trade_ideas are opinions only (no need to compute share quantities).
+- If rag_context is present, use it as supporting context only. Prioritize the current digest.
 - Keep it concise: <= 8 signals, <= 6 trade_ideas.
 Output JSON ONLY.
 """
@@ -44,16 +46,59 @@ class MacroEconomistLLMAgent(BaseAgent):
     name = "macro_econ_llm_v1"
     persona = "Macro Economist (rates/inflation/growth/FX/commodities; prefers liquid ETFs & mega-caps)"
 
-    def __init__(self, client: OpenRouterClient, model: str = "xiaomi/mimo-v2-flash:free"):
+    def __init__(
+        self,
+        client: OpenRouterClient,
+        model: str = "stepfun/step-3.5-flash:free",
+        rag_tool: RAGNewsTool | None = None,
+        rag_top_k: int = 8,
+    ):
         self.client = client
         self.model = model
+        self.rag_tool = rag_tool or RAGNewsTool()
+        self.rag_top_k = rag_top_k
+
+    @staticmethod
+    def _build_rag_query(digest: Digest, state: State) -> str:
+        digest_items = digest.get("news_digest", [])[:6]
+        headlines = [item.get("headline", "") for item in digest_items if item.get("headline")]
+        tags: List[str] = []
+        for item in digest_items:
+            tags.extend(item.get("macro_tags", []))
+        unique_tags = list(dict.fromkeys(tags))[:10]
+        tickers = list((state.get("prices", {}) or {}).keys())[:12]
+        parts = [
+            "macro market context",
+            " ".join(headlines),
+            " ".join(unique_tags),
+            " ".join(tickers),
+        ]
+        return " | ".join(p for p in parts if p)
 
     def run(self, digest: Digest, state: State) -> AgentOutput:
+        rag_context: List[Dict[str, Any]] = []
+        rag_status = "disabled"
+        rag_error = ""
+        query = self._build_rag_query(digest, state)
+        if query:
+            rag_context, rag_error = self.rag_tool.retrieve(
+                query=query,
+                top_k=self.rag_top_k,
+                stock_filter=list((state.get("prices", {}) or {}).keys()),
+            )
+            rag_status = "ok" if rag_context else "empty"
+
         # Provide the LLM only what it needs
         payload = {
             "timestamp": digest.get("timestamp", ""),
             "news_digest": digest.get("news_digest", []),
             "state": state,
+            "rag_context": rag_context,
+            "rag_meta": {
+                "status": rag_status,
+                "query": query,
+                "error": rag_error,
+            },
         }
 
         messages = [
