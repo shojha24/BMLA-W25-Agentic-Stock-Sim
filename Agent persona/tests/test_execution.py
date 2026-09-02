@@ -12,6 +12,8 @@ def order(side, ticker, qty, order_type="MARKET", limit_price=None):
 
 
 def venue(**kw):
+    """Costs and caps off unless a test is specifically about one of them."""
+    kw.setdefault("max_position_pct_equity", 1.0)
     cfg = ExecutionConfig(cost_bps=0.0, slippage_bps=0.0, max_order_pct_equity=1.0, **kw)
     v = MarketFillVenue(cfg)
     v.start_cycle()
@@ -36,7 +38,8 @@ def test_buying_more_than_the_cash_allows_is_a_partial_fill():
     book = Portfolio(5000.0)
     book.apply_fill("QQQ", 50, 100.0, 0.0)     # equity 10k, cash 0... top it back up
     book.cash = 5000.0
-    (fill,), book = run(venue(), [order("BUY", "QQQ", 500)], book=book)
+    # position cap off, so cash is the only binding constraint
+    (fill,), book = run(venue(max_position_pct_equity=0.0), [order("BUY", "QQQ", 500)], book=book)
     assert fill["status"] == "PARTIAL"
     assert fill["filled_qty"] == 50            # $5,000 of cash at $100
     assert fill["reason"] == "insufficient cash"
@@ -62,8 +65,29 @@ def test_shorting_is_allowed_when_configured():
     assert book.positions["TLT"]["qty"] == -5
 
 
+def test_repeated_buys_cannot_exceed_the_position_limit():
+    """Per-order caps alone let an agent build a whole-book position one slice at a time."""
+    v = venue(max_position_pct_equity=0.3)
+    book = Portfolio(10000.0)
+    v.execute({"a": [order("BUY", "QQQ", 20)]}, PRICES, {"a": book}, "T")   # 20% of equity
+    (second,) = v.execute({"a": [order("BUY", "QQQ", 20)]}, PRICES, {"a": book}, "T")
+    assert second["status"] == "PARTIAL"
+    assert "position capped" in second["reason"]
+    assert book.positions["QQQ"]["qty"] == pytest.approx(30.0)
+
+
+def test_the_position_limit_does_not_block_selling():
+    v = venue(max_position_pct_equity=0.1)
+    book = Portfolio(10000.0)
+    book.apply_fill("QQQ", 50, 100.0, 0.0)
+    (fill,) = v.execute({"a": [order("SELL", "QQQ", 50)]}, PRICES, {"a": book}, "T")
+    assert fill["status"] == "FILLED"
+
+
 def test_orders_are_capped_at_a_share_of_equity():
-    v = MarketFillVenue(ExecutionConfig(cost_bps=0.0, slippage_bps=0.0, max_order_pct_equity=0.25))
+    v = MarketFillVenue(ExecutionConfig(cost_bps=0.0, slippage_bps=0.0,
+                                        max_order_pct_equity=0.25,
+                                        max_position_pct_equity=1.0))
     v.start_cycle()
     (fill,), _ = run(v, [order("BUY", "QQQ", 100)])
     assert fill["filled_qty"] == 25          # 25% of 10k equity at $100
@@ -71,7 +95,9 @@ def test_orders_are_capped_at_a_share_of_equity():
 
 
 def test_slippage_is_charged_against_the_taker():
-    v = MarketFillVenue(ExecutionConfig(cost_bps=0.0, slippage_bps=100.0, max_order_pct_equity=1.0))
+    v = MarketFillVenue(ExecutionConfig(cost_bps=0.0, slippage_bps=100.0,
+                                        max_order_pct_equity=1.0,
+                                        max_position_pct_equity=1.0))
     v.start_cycle()
     buy_fills = v.execute({"a": [order("BUY", "QQQ", 1)]}, PRICES, {"a": Portfolio(10000.0)}, "T")
     seller = Portfolio(10000.0)
@@ -82,7 +108,9 @@ def test_slippage_is_charged_against_the_taker():
 
 
 def test_commission_is_charged_on_notional():
-    v = MarketFillVenue(ExecutionConfig(cost_bps=10.0, slippage_bps=0.0, max_order_pct_equity=1.0))
+    v = MarketFillVenue(ExecutionConfig(cost_bps=10.0, slippage_bps=0.0,
+                                        max_order_pct_equity=1.0,
+                                        max_position_pct_equity=1.0))
     v.start_cycle()
     (fill,), book = run(v, [order("BUY", "QQQ", 10)])
     assert fill["cost"] == pytest.approx(1.0)
@@ -91,7 +119,8 @@ def test_commission_is_charged_on_notional():
 
 def test_cooldown_blocks_a_second_trade_in_the_same_ticker():
     v = MarketFillVenue(ExecutionConfig(cost_bps=0.0, slippage_bps=0.0,
-                                        max_order_pct_equity=1.0, cooldown_cycles=2))
+                                        max_order_pct_equity=1.0,
+                                        max_position_pct_equity=1.0, cooldown_cycles=2))
     book = Portfolio(10000.0)
     v.start_cycle()
     first = v.execute({"a": [order("BUY", "QQQ", 5)]}, PRICES, {"a": book}, "T")

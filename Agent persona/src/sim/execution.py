@@ -25,7 +25,8 @@ class ExecutionConfig:
     slippage_bps: float = 2.0        # price concession, charged against the taker
     allow_short: bool = False        # whiteboard flow is buy/sell of held shares
     whole_shares: bool = True
-    max_order_pct_equity: float = 0.35
+    max_order_pct_equity: float = 0.35   # largest single order
+    max_position_pct_equity: float = 0.5  # largest resulting position in one name
     cooldown_cycles: int = 0         # per agent+ticker; 0 disables
     min_notional: float = 1.0
 
@@ -94,6 +95,14 @@ class MarketFillVenue(ExecutionVenue):
         cap_qty = (equity * cfg.max_order_pct_equity) / price if price > 0 else 0.0
         if qty > cap_qty:
             qty, reason = cap_qty, f"capped at {cfg.max_order_pct_equity:.0%} of equity"
+
+        # Concentration limit: repeated small buys must not add up to the whole book.
+        if order["side"] == "BUY" and cfg.max_position_pct_equity > 0 and price > 0:
+            held = book.positions.get(order["ticker"], {}).get("qty", 0.0)
+            room = (equity * cfg.max_position_pct_equity) / price - held
+            if qty > room:
+                qty = max(room, 0.0)
+                reason = f"position capped at {cfg.max_position_pct_equity:.0%} of equity"
 
         if order["side"] == "BUY":
             unit = price * (1.0 + cfg.slippage_bps / 10000.0) * (1.0 + cfg.cost_bps / 10000.0)

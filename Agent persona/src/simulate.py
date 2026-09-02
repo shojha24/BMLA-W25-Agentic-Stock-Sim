@@ -32,6 +32,7 @@ from data.market_data import PriceStore                     # noqa: E402
 from data.news_feed import build_feed                       # noqa: E402
 from eval.benchmarks import DEFAULT_BENCHMARKS, build_benchmarks  # noqa: E402
 from eval.metrics import compare                            # noqa: E402
+from eval.rescore import rescore_run                        # noqa: E402
 from orchestration.roundtable import Roundtable             # noqa: E402
 from sim.engine import EngineConfig, SimulationEngine       # noqa: E402
 from sim.execution import ExecutionConfig, MarketFillVenue  # noqa: E402
@@ -88,7 +89,7 @@ def make_engine(args, universe, panel=None, rag_tool=None, run_id="", benchmarks
         trade_agent_books=not args.no_agent_books, use_briefs=not args.no_briefs,
         index_live_news=not args.no_live_index, context_top_k=args.context_top_k,
         reflect=not args.no_reflections, reflections_top_k=args.reflections_top_k,
-        memory_scope=args.memory_scope,
+        memory_scope=args.memory_scope, reflect_every_cycles=args.reflect_every,
     )
 
     # The Town Crier writes the segment summary and the retrieval questions. It uses
@@ -112,6 +113,7 @@ def make_engine(args, universe, panel=None, rag_tool=None, run_id="", benchmarks
         cost_bps=args.cost_bps, slippage_bps=args.slippage_bps,
         allow_short=args.agents_may_short,      # off by default: buy/sell of held shares only
         max_order_pct_equity=args.max_order_pct, cooldown_cycles=args.cooldown_cycles,
+        max_position_pct_equity=args.max_position_pct,
     )
     names = None if args.benchmarks == "default" else (
         [] if args.benchmarks in ("", "none") else args.benchmarks.split(","))
@@ -227,48 +229,95 @@ def cmd_ablate(args) -> None:
     """Same window, same news, different system configuration."""
     universe = [t.strip().upper() for t in args.universe.split(",") if t.strip()]
     rag_tool = RAGNewsTool()
+    # Each variant turns off exactly one thing, so the column it moves is the thing.
     variants = {
-        "full_panel": dict(personas=DEFAULT_PANEL, rounds=2, use_rag=True),
-        "no_rag": dict(personas=DEFAULT_PANEL, rounds=2, use_rag=False),
-        "no_communication": dict(personas=DEFAULT_PANEL, rounds=1, use_rag=True),
-        "single_agent": dict(personas=["macro_econ"], rounds=1, use_rag=True),
+        "full_panel":       dict(panel=dict(personas=DEFAULT_PANEL, rounds=2, use_rag=True)),
+        "no_rag":           dict(panel=dict(personas=DEFAULT_PANEL, rounds=2, use_rag=False)),
+        "no_communication": dict(panel=dict(personas=DEFAULT_PANEL, rounds=1, use_rag=True)),
+        "single_agent":     dict(panel=dict(personas=["macro_econ"], rounds=1, use_rag=True)),
+        "no_briefs":        dict(panel=dict(personas=DEFAULT_PANEL, rounds=2, use_rag=True),
+                                 engine={"use_briefs": False}),
+        "no_memory":        dict(panel=dict(personas=DEFAULT_PANEL, rounds=2, use_rag=True),
+                                 engine={"reflect": False}),
     }
     chosen = [v.strip() for v in args.variants.split(",") if v.strip()] if args.variants else list(variants)
     if args.mode != "llm":
         print("[warn] --mode is not 'llm': the mock and hardcoded agents ignore retrieved context,\n"
-              "       so the no_rag variant will be identical to full_panel. Use --mode llm for a\n"
-              "       meaningful RAG ablation.")
+              "       briefs and reflections, so no_rag / no_briefs / no_memory will come out\n"
+              "       identical to full_panel. Use --mode llm for those three to mean anything.")
 
     results = {}
     for name in chosen:
         if name not in variants:
             raise SystemExit(f"Unknown variant {name}. Available: {sorted(variants)}")
         print(f"\n--- ablation: {name} ---", flush=True)
-        panel = make_panel(args, rag_tool, **variants[name])
+        variant = variants[name]
+        panel = make_panel(args, rag_tool, **variant["panel"])
         # Benchmarks are identical across variants; only run them once.
         engine = make_engine(args, universe, panel=panel, rag_tool=rag_tool,
                              run_id=f"ablate_{name}_{datetime.now():%Y%m%dT%H%M%S}",
                              benchmarks=None if name == chosen[0] else [])
+        for key, value in (variant.get("engine") or {}).items():
+            setattr(engine.config, key, value)
         report = engine.run_backtest(args.start, args.end, step_days=args.step_days,
                                      max_cycles=args.max_cycles)
         results[name] = report
         print_report(report)
 
     print("\n=== ablation summary (agents_consensus) ===")
-    print(f"{'variant':20} {'hit':>7} {'wtd hit':>8} {'brier':>7} {'return':>9} {'sharpe':>8}")
+    print(f"{'variant':20} {'hit':>7} {'wtd hit':>8} {'brier':>7} {'return':>9} {'sharpe':>8} "
+          f"{'orders':>7}")
     rows = {}
     for name, rep in results.items():
         fm = rep["forecast_metrics"].get("agents_consensus", {})
         pm = rep["portfolio_metrics"].get("agents_consensus", {})
+        orders = (rep.get("execution", {}).get("totals", {}) or {}).get("n_orders", 0)
         rows[name] = {"hit_rate": fm.get("hit_rate"), "brier": fm.get("brier_score"),
-                      "cumulative_return": pm.get("cumulative_return"), "sharpe": pm.get("sharpe")}
+                      "cumulative_return": pm.get("cumulative_return"), "sharpe": pm.get("sharpe"),
+                      "orders": orders,
+                      "sim_vs_actual": rep.get("sim_vs_actual", {})}
         print(f"{name:20} {(fm.get('hit_rate') or 0):7.3f} "
               f"{(fm.get('confidence_weighted_hit_rate') or 0):8.3f} "
               f"{(fm.get('brier_score') or 0):7.3f} "
-              f"{(pm.get('cumulative_return') or 0) * 100:8.2f}% {(pm.get('sharpe') or 0):8.2f}")
+              f"{(pm.get('cumulative_return') or 0) * 100:8.2f}% {(pm.get('sharpe') or 0):8.2f} "
+              f"{orders:7d}")
 
     out = Path(args.out or f"Agent persona/data/runs/ablation_{datetime.now():%Y%m%dT%H%M%S}.json")
     save_json(out, {"variants": rows, "reports": {k: v["run_id"] for k, v in results.items()}})
+    print(f"\nwrote {out}")
+
+
+def cmd_score(args) -> None:
+    """Score a finished run once the market has moved (live runs need this)."""
+    logs = sorted(Path(args.runs_dir).glob("run_*.jsonl")) if not args.log else [Path(args.log)]
+    if not logs:
+        raise SystemExit(f"No run logs found in {args.runs_dir}")
+    log = logs[-1]
+
+    report = rescore_run(log, horizon=args.horizon or "", index_ticker=args.index,
+                         refresh=args.refresh)
+    print(f"\n=== scored {report['run_id']} ({Path(report['run_log']).name}) ===")
+    print(f"horizon {report['horizon']} on {report['bar_interval']} bars | "
+          f"{report['cycles_scored']}/{report['cycles_in_log']} cycles scorable"
+          + (f" ({report['cycles_not_yet_scorable']} still waiting on prices)"
+             if report["cycles_not_yet_scorable"] else ""))
+
+    fm = report["forecast_metrics"]
+    if fm:
+        print(f"\n{'model':28} {'n':>5} {'hit':>7} {'wtd hit':>8} {'brier':>7} {'MAE bps':>8}")
+        for name, m in sorted(fm.items(), key=lambda kv: -(kv[1].get("hit_rate") or 0)):
+            print(f"{name:28} {m['n_directional']:5d} {(m['hit_rate'] or 0):7.3f} "
+                  f"{(m['confidence_weighted_hit_rate'] or 0):8.3f} "
+                  f"{(m['brier_score'] or 0):7.3f} {(m['mean_abs_error_bps'] or 0):8.1f}")
+
+    sva = report["sim_vs_actual"]
+    print(f"\nsim vs actual: regime {sva['regime_accuracy']} on {sva['regime_calls']} calls | "
+          f"direction {sva['directional_accuracy']} on {sva['directional_calls']} | "
+          f"expected {sva['mean_expected_bps']:+.1f}bps vs actual {sva['mean_actual_bps']:+.1f}bps "
+          f"(bias {sva['magnitude_bias_bps']:+.1f})")
+
+    out = Path(args.out) if args.out else log.with_name(log.stem + "_scored.json")
+    save_json(out, report)
     print(f"\nwrote {out}")
 
 
@@ -320,6 +369,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="ablation: agents keep no memory of their own past days")
         sp.add_argument("--reflections-top-k", type=int, default=3,
                         help="past lessons recalled into each brief")
+        sp.add_argument("--reflect-every", type=int, default=1,
+                        help="cycles between reflections (1 = every cycle, 2 = twice a day at 15m)")
+        sp.add_argument("--max-position-pct", type=float, default=0.5,
+                        help="largest resulting position in one name, as a share of equity")
         sp.add_argument("--memory-scope", choices=["run", "global"], default="run",
                         help="'run' keeps memory inside this run; 'global' remembers earlier runs")
         sp.add_argument("--quiet", action="store_true")
@@ -347,6 +400,15 @@ def build_parser() -> argparse.ArgumentParser:
     ab.add_argument("--variants", default="")
     ab.add_argument("--out", default="")
     ab.set_defaults(func=cmd_ablate)
+
+    sc = sub.add_parser("score", help="score a finished run once prices exist (live runs need this)")
+    sc.add_argument("--log", default="", help="run log path (default: newest in --runs-dir)")
+    sc.add_argument("--runs-dir", default="Agent persona/data/runs")
+    sc.add_argument("--horizon", default="", help="override the horizon recorded in the log")
+    sc.add_argument("--index", default="SPY")
+    sc.add_argument("--refresh", action="store_true", help="re-download prices")
+    sc.add_argument("--out", default="")
+    sc.set_defaults(func=cmd_score, mode="mock")
     return p
 
 

@@ -25,7 +25,13 @@ python "Agent persona/src/main.py" --task roundtable --mode llm
 python "Agent persona/src/simulate.py" backtest --start 2016-01-04 --end 2016-06-30 --mode mock
 
 # live: poll Yahoo Finance headlines every 15 minutes (no API key needed for news or prices)
-python "Agent persona/src/simulate.py" live --interval 15 --cycles 8 --mode llm
+python "Agent persona/src/simulate.py" live --interval 15 --cycles 8 --mode llm --horizon 15m
+
+# score that live run once the market has moved
+python "Agent persona/src/simulate.py" score
+
+# is RAG / the second round / the brief / memory earning its keep?
+python "Agent persona/src/simulate.py" ablate --start 2016-01-04 --end 2016-03-31 --mode llm
 ```
 
 `.env` must use the `VAR=value` form. A file containing only a bare key is silently
@@ -53,7 +59,10 @@ ignored by python-dotenv, which is why the LLM path used to fail with "API key n
 | Scoring vs realized returns; index + 5 naive benchmarks | ✅ `eval/` - hit rate, Brier, MAE, Sharpe, drawdown |
 | Ablations (RAG on/off, communication on/off, 1 agent vs 3) | ✅ `simulate.py ablate` |
 | Per-cycle JSONL run log + run report | ✅ `Agent persona/data/runs/` |
-| Intraday (15-minute) *backtesting* | ❌ live-only; no intraday price history |
+| Intraday horizons (15m/30m/1h) on real 15-minute bars | ✅ `--horizon 15m`, last ~60 days |
+| Scoring a live run after the fact | ✅ `simulate.py score` |
+| Sim-vs-actual comparison (regime, direction, magnitude bias) | ✅ in every report |
+| Intraday *backtesting* over a long window | ❌ no free source of historical intraday news |
 
 See `Agent persona/README.md` for the architecture and `Agent persona/SIMULATION.md` for the
 simulation, benchmark and ablation reference.
@@ -94,4 +103,4 @@ run from the repo root and do not need re-running.
 python -m pytest "Agent persona/tests" -q
 ```
 
-177 tests, no network required.
+191 tests, no network required.

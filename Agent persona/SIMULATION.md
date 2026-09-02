@@ -141,8 +141,10 @@ A real lesson from a Brexit-window run:
 > but my 0.55 confidence capped position size when the move was large and obvious."*
 > — `contrarian_value_llm_v1`, tags `RISK_OFF, POSITION_SIZING, GOLD_HEDGE, BREXIT_REACTION`
 
-Flags: `--reflection-mode llm|heuristic|auto`, `--reflections-top-k N`, `--no-reflections`
-(the ablation: agents with no memory of their own past days).
+Flags: `--reflection-mode llm|heuristic|auto`, `--reflections-top-k N`, `--reflect-every N`
+(the whiteboard's "2x a day? end of financial day?" question — 1 is every cycle),
+`--memory-scope run|global`, and `--no-reflections` (the ablation: agents with no memory of
+their own past days).
 
 A day with no trades and no open positions produces no reflection — there is nothing to learn
 from having done nothing.
@@ -164,6 +166,7 @@ fills at the market price plus slippage and enforces, per order:
 | sell only shares you hold | `--agents-may-short` | no shorting |
 | whole shares | — | on |
 | max single order as share of that agent's equity | `--max-order-pct` | 35% |
+| max resulting position in one name | `--max-position-pct` | 50% of equity |
 | wait N cycles before re-trading a ticker | `--cooldown-cycles` | 0 (off) |
 | price concession | `--slippage-bps` | 2 bps |
 | commission on notional | `--cost-bps` | 1 bp |
@@ -209,6 +212,44 @@ The magnitudes are still scored (MAE), just not traded.
 
 All of them emit the same `Forecast` records and run through identical sizing, costs and
 scoring.
+
+## Horizons and intraday bars
+
+`--horizon` accepts daily horizons (`1d`, `2d`, `5d`) and intraday ones (`15m`, `30m`, `1h`).
+Intraday horizons mark books and score forecasts on 15-minute bars from the Yahoo chart
+endpoint, cached under `dataset/prices/intraday/`.
+
+Yahoo serves 15-minute bars for the **last ~60 days only**, and there is no free source of
+historical intraday *news*, so a true 15-minute backtest over a long window is not possible
+with free data. What is possible, and what the project does: run the 15-minute loop live, and
+score it afterwards (below) as the bars print.
+
+## Scoring a finished run
+
+A live forecast cannot be judged when it is made — the next 15 minutes have not happened yet.
+So scoring is a separate pass over the run log:
+
+```bash
+python "Agent persona/src/simulate.py" score                    # newest run in data/runs
+python "Agent persona/src/simulate.py" score --log <run>.jsonl --horizon 15m
+```
+
+It fetches the prices that have since printed, scores every model recorded in the log
+(consensus, round-1 consensus, and each agent individually), and writes `<run>_scored.json`.
+Cycles whose horizon has not elapsed are reported as `cycles_not_yet_scorable` rather than
+silently dropped. Because the log holds everything, a run can also be re-scored on a
+different horizon without paying for the LLM calls again.
+
+## Sim vs actual
+
+The last box on the whiteboard. Every report carries a `sim_vs_actual` block:
+
+| field | question |
+|---|---|
+| `regime_accuracy` | did the panel's RISK_ON/RISK_OFF call match what the index did? |
+| `directional_accuracy` | was the consensus right per ticker? |
+| `mean_expected_bps` vs `mean_actual_bps` | how big did it think the moves would be? |
+| `magnitude_bias_bps` | positive = the panel expected more movement than the market delivered |
 
 ## Metrics
 

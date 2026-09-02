@@ -17,9 +17,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from core.io import append_jsonl, save_json
-from data.market_data import PriceStore, horizon_to_sessions
+from data.market_data import (PriceStore, horizon_to_bars, horizon_to_sessions, is_intraday)
 from eval.benchmarks import NaiveForecaster
-from eval.metrics import score_forecasts, summarize_equity, summarize_forecasts
+from eval.metrics import (score_forecasts, summarize_equity, summarize_forecasts,
+                          summarize_sim_vs_actual)
 from agents.reflection import DayRecord, ReflectionAgent
 from agents.town_crier import SegmentBrief, TownCrierAgent
 from orchestration.roundtable import Roundtable
@@ -62,6 +63,7 @@ class EngineConfig:
     # Phase 3: end-of-day reflection, stored privately per agent and retrieved
     # back into the brief.
     reflect: bool = True
+    reflect_every_cycles: int = 1     # the whiteboard's "2x a day? end of day?" knob
     reflections_top_k: int = 3
     # "run" keeps each run's memory to itself (reproducible ablations);
     # "global" lets agents remember earlier runs in the same store.
@@ -140,6 +142,7 @@ class SimulationEngine:
         self.reflection_store = ReflectionStore(self.log_dir / "reflections.sqlite")
         self.personas = {a.name: getattr(a, "persona", a.name) for a in self.panel.agents}
         self.pending_reflections: Dict[str, DayRecord] = {}
+        self.bar_interval = "15m"
         self.reflections_written = 0
         self.fills: List[Dict[str, Any]] = []
         self.cycle_index = 0
@@ -151,9 +154,33 @@ class SimulationEngine:
         return target_weights(forecasts, max_gross=c.max_gross, max_name=c.max_name,
                               min_confidence=c.min_confidence, allow_short=c.allow_short)
 
+    def _prices_now(self, day: str, timestamp: str) -> Dict[str, float]:
+        """Intraday horizons mark at the bar; daily horizons mark at the close."""
+        tickers = self.config.universe + [self.config.index_ticker]
+        if is_intraday(self.config.horizon):
+            prices = self.prices.prices_at(tickers, timestamp, self.bar_interval)
+            if prices:
+                return prices
+        return self.prices.prices_on(tickers, day)
+
+    def _realized(self, day: str, timestamp: str) -> Dict[str, float]:
+        """Forward move over the horizon: bars intraday, sessions otherwise."""
+        out: Dict[str, float] = {}
+        intraday = is_intraday(self.config.horizon)
+        bars = horizon_to_bars(self.config.horizon, 15)
+        sessions = horizon_to_sessions(self.config.horizon)
+        for ticker in self.config.universe:
+            value = (self.prices.forward_return_bps_intraday(ticker, timestamp, bars,
+                                                             self.bar_interval)
+                     if intraday else
+                     self.prices.forward_return_bps(ticker, day, sessions))
+            if value is not None:
+                out[ticker] = value
+        return out
+
     def run_cycle(self, at: datetime, day: str, score: bool = True) -> Optional[Dict[str, Any]]:
         cfg = self.config
-        prices_now = self.prices.prices_on(cfg.universe + [cfg.index_ticker], day)
+        prices_now = self._prices_now(day, at.strftime("%Y-%m-%dT%H:%M:%SZ"))
         if not prices_now:
             self.skipped.append({"day": day, "reason": "no prices"})
             return None
@@ -233,13 +260,14 @@ class SimulationEngine:
                 prices=self.prices, horizon=cfg.horizon,
             )
 
-        realized: Dict[str, float] = {}
+        realized = self._realized(day, timestamp) if score else {}
+        index_bps = None
         if score:
-            sessions = horizon_to_sessions(cfg.horizon)
-            for ticker in cfg.universe:
-                value = self.prices.forward_return_bps(ticker, day, sessions)
-                if value is not None:
-                    realized[ticker] = value
+            index_bps = (self.prices.forward_return_bps_intraday(
+                cfg.index_ticker, timestamp, horizon_to_bars(cfg.horizon, 15), self.bar_interval)
+                if is_intraday(cfg.horizon) else
+                self.prices.forward_return_bps(cfg.index_ticker, day,
+                                               horizon_to_sessions(cfg.horizon)))
 
         cycle_scores: Dict[str, Any] = {}
         for name, forecasts in forecasts_by_model.items():
@@ -275,8 +303,10 @@ class SimulationEngine:
             self.fills.extend(cycle_fills)
             execution = summarize_fills(cycle_fills)
 
-        reflections_now = self._settle_reflections(realized, universe_prices)
-        self._hold_for_reflection(final_outputs, cycle_fills, universe_prices, day, timestamp)
+        due = (self.cycle_index % max(cfg.reflect_every_cycles, 1)) == 0
+        reflections_now = self._settle_reflections(realized, universe_prices) if due else 0
+        if due or not self.pending_reflections:
+            self._hold_for_reflection(final_outputs, cycle_fills, universe_prices, day, timestamp)
 
         indexed = self._index_segment(news)
 
@@ -304,6 +334,7 @@ class SimulationEngine:
             "revision": table.get("revision", {}),
             "errors": table.get("errors", []),
             "realized_bps": {k: round(v, 2) for k, v in realized.items()},
+            "index_bps": None if index_bps is None else round(index_bps, 2),
             "cycle_scores": cycle_scores,
             "books": {name: pf.snapshot(prices_now) for name, pf in self.portfolios.items()},
             "agent_books": {name: book.snapshot(universe_prices)
@@ -312,8 +343,9 @@ class SimulationEngine:
             "execution": execution,
         }
         append_jsonl(self.log_path, record)
-        self.cycles.append({"day": day, "n_news": len(news),
-                            "consensus": table["consensus"], "cycle_scores": cycle_scores})
+        self.cycles.append({"day": day, "n_news": len(news), "consensus": table["consensus"],
+                            "cycle_scores": cycle_scores, "realized_bps": realized,
+                            "index_bps": index_bps})
         self.segments.append({"day": day, "source": segment.source, "n_items": segment.n_items,
                               "context_docs": len(context["documents"])})
         return record
@@ -526,6 +558,7 @@ class SimulationEngine:
             "reflection": {
                 "enabled": self.config.reflect,
                 "reflector": "llm" if self.reflection_agent.use_llm else "heuristic",
+                "every_cycles": self.config.reflect_every_cycles,
                 "written": self.reflections_written,
                 "scope": self.config.memory_scope,
                 "per_agent": {name: self.reflection_store.count(name, run_id=self.run_id)
@@ -543,6 +576,7 @@ class SimulationEngine:
             },
             "agents": self.panel.agents_names if hasattr(self.panel, "agents_names") else [a.name for a in self.panel.agents],
             "forecast_metrics": forecast_stats,
+            "sim_vs_actual": summarize_sim_vs_actual(self.cycles),
             "portfolio_metrics": equity_stats,
             "equity_curves": {k: [round(v, 2) for v in c] for k, c in self.curves.items()},
             "revision": revision,

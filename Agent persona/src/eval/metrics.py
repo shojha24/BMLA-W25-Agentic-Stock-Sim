@@ -109,3 +109,61 @@ def compare(models: Dict[str, Dict[str, Any]], key: str = "sharpe") -> List[Dict
     rows = [{"model": name, **stats} for name, stats in models.items()]
     rows.sort(key=lambda r: (r.get(key) is None, -(r.get(key) or 0)))
     return rows
+
+
+REGIME_SIGN = {"RISK_ON": 1, "RISK_OFF": -1, "NEUTRAL": 0}
+
+
+def summarize_sim_vs_actual(cycles: Sequence[Dict[str, Any]],
+                            flat_band_bps: float = 10.0) -> Dict[str, Any]:
+    """The whiteboard's last box: the simulation's collective call vs the market.
+
+    Three questions, one per row of the result:
+      * did the panel's risk regime match what the index actually did?
+      * was the consensus directionally right, per ticker?
+      * was it biased - did it expect bigger or smaller moves than happened?
+    """
+    regime_calls = regime_hits = 0
+    directional = hits = 0
+    expected: List[float] = []
+    actual: List[float] = []
+    scored_cycles = 0
+
+    for cycle in cycles:
+        consensus = cycle.get("consensus") or {}
+        realized = cycle.get("realized_bps") or {}
+        if not realized:
+            continue
+        scored_cycles += 1
+
+        index_move = cycle.get("index_bps")
+        regime = str(consensus.get("risk_regime", "NEUTRAL")).upper()
+        if index_move is not None and regime in REGIME_SIGN:
+            called = REGIME_SIGN[regime]
+            happened = 0 if abs(index_move) <= flat_band_bps else (1 if index_move > 0 else -1)
+            regime_calls += 1
+            regime_hits += int(called == happened)
+
+        for f in consensus.get("forecasts", []) or []:
+            moved = realized.get(str(f.get("ticker", "")).upper())
+            if moved is None:
+                continue
+            expected.append(float(f.get("expected_return_bps", 0.0)))
+            actual.append(moved)
+            if str(f.get("direction")) in ("UP", "DOWN"):
+                directional += 1
+                hits += int((moved > 0) == (f["direction"] == "UP"))
+
+    mean_expected = statistics.fmean(expected) if expected else 0.0
+    mean_actual = statistics.fmean(actual) if actual else 0.0
+    return {
+        "cycles_scored": scored_cycles,
+        "regime_calls": regime_calls,
+        "regime_accuracy": round(regime_hits / regime_calls, 4) if regime_calls else None,
+        "directional_calls": directional,
+        "directional_accuracy": round(hits / directional, 4) if directional else None,
+        "mean_expected_bps": round(mean_expected, 2),
+        "mean_actual_bps": round(mean_actual, 2),
+        # Positive = the panel expected more movement than the market delivered.
+        "magnitude_bias_bps": round(mean_expected - mean_actual, 2),
+    }

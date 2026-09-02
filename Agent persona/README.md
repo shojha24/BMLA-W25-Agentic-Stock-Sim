@@ -105,13 +105,13 @@ portfolio. See `SIMULATION.md` for feeds, benchmarks, metrics, ablations and the
 
 ```
 src/
-  simulate.py              backtest / live / ablate
+  simulate.py              backtest / live / ablate / score
   agents/  town_crier.py   summarizes the segment, writes the retrieval questions
            reflection.py   end-of-day self-review, written to private memory
   data/    news_feed.py market_data.py digest_builder.py
   sim/     brief.py portfolio.py execution.py engine.py actions_db.py assets_db.py
   tools/   rag.py news_index.py reflection_store.py headline_store.py
-  eval/    metrics.py benchmarks.py
+  eval/    metrics.py benchmarks.py rescore.py
 ```
 
 Each cycle the Town Crier summarizes the news and writes the retrieval questions; retrieval

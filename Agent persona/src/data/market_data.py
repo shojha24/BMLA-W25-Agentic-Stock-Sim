@@ -31,6 +31,8 @@ class PriceStore:
         self.request_pause_s = request_pause_s
         self._series: Dict[str, Dict[str, float]] = {}
         self._days: Dict[str, List[str]] = {}
+        self._intraday: Dict[tuple, Dict[str, float]] = {}
+        self._intraday_stamps: Dict[tuple, List[str]] = {}
 
     # ---------------- fetch / cache ----------------
 
@@ -164,6 +166,110 @@ class PriceStore:
             return None
         return (end_close / start_close - 1.0) * 10000.0
 
+    # ---------------- intraday ----------------
+
+    def _intraday_path(self, ticker: str, interval: str) -> Path:
+        directory = self.cache_dir / "intraday"
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory / f"{ticker.upper()}_{interval}.csv"
+
+    def download_intraday(self, ticker: str, interval: str = "15m", lookback: str = "60d") -> int:
+        """Fetch intraday bars. Yahoo serves 15m bars for the last ~60 days only,
+        which is the hard ceiling on how far back an intraday run can reach."""
+        resp = requests.get(CHART_URL.format(ticker=ticker.upper()),
+                            params={"interval": interval, "range": lookback},
+                            headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        result = (resp.json().get("chart") or {}).get("result")
+        if not result:
+            raise RuntimeError(f"No intraday data returned for {ticker}")
+        res = result[0]
+        stamps = res.get("timestamp") or []
+        closes = (res.get("indicators", {}).get("quote") or [{}])[0].get("close") or []
+
+        rows = {}
+        for i, ts in enumerate(stamps):
+            close = closes[i] if i < len(closes) else None
+            if close is None:
+                continue
+            when = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            rows[when] = float(close)
+
+        path = self._intraday_path(ticker, interval)
+        if path.exists():
+            with open(path, newline="", encoding="utf-8") as f:
+                existing = {r["timestamp"]: float(r["close"]) for r in csv.DictReader(f)}
+            existing.update(rows)
+            rows = existing
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["timestamp", "close"])
+            for when in sorted(rows):
+                w.writerow([when, rows[when]])
+        self._intraday.pop((ticker.upper(), interval), None)
+        time.sleep(self.request_pause_s)
+        return len(rows)
+
+    def ensure_intraday(self, tickers: Sequence[str], interval: str = "15m",
+                        lookback: str = "60d", refresh: bool = False) -> Dict[str, int]:
+        out: Dict[str, int] = {}
+        for ticker in tickers:
+            if self._intraday_path(ticker, interval).exists() and not refresh:
+                out[ticker.upper()] = 0
+                continue
+            try:
+                out[ticker.upper()] = self.download_intraday(ticker, interval, lookback)
+            except Exception:
+                out[ticker.upper()] = -1
+        return out
+
+    def load_intraday(self, ticker: str, interval: str = "15m") -> Dict[str, float]:
+        key = (ticker.upper(), interval)
+        if key in self._intraday:
+            return self._intraday[key]
+        path = self._intraday_path(ticker, interval)
+        if not path.exists():
+            self._intraday[key] = {}
+            self._intraday_stamps[key] = []
+            return {}
+        with open(path, newline="", encoding="utf-8") as f:
+            series = {r["timestamp"]: float(r["close"]) for r in csv.DictReader(f) if r.get("close")}
+        self._intraday[key] = series
+        self._intraday_stamps[key] = sorted(series)
+        return series
+
+    def price_at(self, ticker: str, timestamp: str, interval: str = "15m") -> Optional[float]:
+        """Last intraday print at or before `timestamp`."""
+        series = self.load_intraday(ticker, interval)
+        if not series:
+            return None
+        stamps = self._intraday_stamps[(ticker.upper(), interval)]
+        i = bisect_right(stamps, timestamp) - 1
+        return series[stamps[i]] if i >= 0 else None
+
+    def forward_return_bps_intraday(self, ticker: str, timestamp: str, bars: int = 1,
+                                    interval: str = "15m") -> Optional[float]:
+        series = self.load_intraday(ticker, interval)
+        if not series:
+            return None
+        stamps = self._intraday_stamps[(ticker.upper(), interval)]
+        i = bisect_right(stamps, timestamp) - 1
+        if i < 0 or i + bars >= len(stamps):
+            return None
+        start, end = series[stamps[i]], series[stamps[i + bars]]
+        if start <= 0:
+            return None
+        return (end / start - 1.0) * 10000.0
+
+    def prices_at(self, tickers: Sequence[str], timestamp: str,
+                  interval: str = "15m") -> Dict[str, float]:
+        out = {}
+        for ticker in tickers:
+            px = self.price_at(ticker, timestamp, interval)
+            if px is not None:
+                out[ticker.upper()] = round(px, 4)
+        return out
+
     def prices_on(self, tickers: Sequence[str], day: str) -> Dict[str, float]:
         out = {}
         for t in tickers:
@@ -173,8 +279,22 @@ class PriceStore:
         return out
 
 
-HORIZON_DAYS = {"15m": 1, "1d": 1, "2d": 2, "5d": 5, "1w": 5, "1m": 21}
+HORIZON_DAYS = {"1d": 1, "2d": 2, "5d": 5, "1w": 5, "1m": 21}
+# Intraday horizons, expressed in 15-minute bars.
+HORIZON_BARS = {"15m": 1, "30m": 2, "1h": 4, "2h": 8, "4h": 16}
+
+
+def is_intraday(horizon: str) -> bool:
+    return str(horizon).lower() in HORIZON_BARS
 
 
 def horizon_to_sessions(horizon: str) -> int:
+    """Daily sessions a horizon spans. Intraday horizons settle inside one session."""
     return HORIZON_DAYS.get(str(horizon).lower(), 1)
+
+
+def horizon_to_bars(horizon: str, bar_minutes: int = 15) -> int:
+    bars = HORIZON_BARS.get(str(horizon).lower())
+    if bars is None:
+        return max(1, (horizon_to_sessions(horizon) * 390) // bar_minutes)
+    return max(1, (bars * 15) // bar_minutes)
