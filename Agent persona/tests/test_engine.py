@@ -317,3 +317,64 @@ def test_reflection_can_be_switched_off(prices, feed, tmp_path):
     report = engine.run_backtest("2016-01-04", "2016-01-19")
     assert report["reflection"]["written"] == 0
     assert engine.reflection_store.count() == 0
+
+
+def test_a_run_can_be_resumed_where_it_stopped(prices, feed, tmp_path):
+    """A 15-minute loop meant to run for days must survive a restart."""
+    first = make_engine(prices, feed, tmp_path)
+    first.run_backtest("2016-01-04", "2016-01-11")
+    run_id = first.run_id
+    marks = {"AAA": 100.0, "BBB": 100.0}
+    before = {name: (book.equity(marks), dict(book.positions))
+              for name, book in first.agent_books.items()}
+    cycles_before = first.cycle_index
+    assert cycles_before > 0
+
+    second = make_engine(prices, feed, tmp_path)
+    state = second.resume(run_id)
+
+    assert second.run_id == run_id
+    assert state["cycles_before"] == cycles_before
+    for name, book in second.agent_books.items():
+        equity, positions = before[name]
+        assert book.equity(marks) == pytest.approx(equity)
+        # positions come back too, not just cash (whatever they were, flat included)
+        assert {t: round(p["qty"], 4) for t, p in book.positions.items()} == \
+               {t: round(p["qty"], 4) for t, p in positions.items()}
+
+
+def test_resuming_continues_the_cycle_count_and_the_curves(prices, feed, tmp_path):
+    first = make_engine(prices, feed, tmp_path)
+    first.run_backtest("2016-01-04", "2016-01-11")
+
+    second = make_engine(prices, feed, tmp_path)
+    second.resume(first.run_id)
+    seeded = len(second.agent_curves["macro_econ_llm_v2"])
+    report = second.run_backtest("2016-01-12", "2016-01-19")
+
+    assert seeded > 0
+    assert second.cycle_index > first.cycle_index
+    assert len(report["agent_equity_curves"]["macro_econ_llm_v2"]) > seeded
+    assert report["resumed_from"]["run_id"] == first.run_id
+
+
+def test_a_resumed_run_keeps_its_memory_and_trade_history(prices, feed, tmp_path):
+    first = make_engine(prices, feed, tmp_path)
+    first.run_backtest("2016-01-04", "2016-01-11")
+    reflections_before = first.reflection_store.count(run_id=first.run_id)
+
+    second = make_engine(prices, feed, tmp_path)
+    state = second.resume(first.run_id)
+    assert sum(state["reflections"].values()) == reflections_before
+    assert sum(state["prior_trades"].values()) >= 0
+
+    second.run_backtest("2016-01-12", "2016-01-19")
+    assert second.reflection_store.count(run_id=first.run_id) > reflections_before
+
+
+def test_resuming_an_unknown_run_starts_clean(prices, feed, tmp_path):
+    engine = make_engine(prices, feed, tmp_path)
+    state = engine.resume("run_that_never_happened")
+    assert state["books"] == {}
+    assert state["cycles_before"] == 0
+    assert all(book.cash == engine.config.agent_cash for book in engine.agent_books.values())

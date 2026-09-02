@@ -76,6 +76,7 @@ def make_panel(args, rag_tool, personas=None, rounds=None, use_rag=None):
 
 
 def make_engine(args, universe, panel=None, rag_tool=None, run_id="", benchmarks=None):
+    run_id = run_id or getattr(args, "resume", "") or ""
     rag_tool = rag_tool or RAGNewsTool()
     panel = panel or make_panel(args, rag_tool)
     feed = build_feed(args.feed, universe,
@@ -124,6 +125,23 @@ def make_engine(args, universe, panel=None, rag_tool=None, run_id="", benchmarks
                             execution_config=execution_config,
                             town_crier=town_crier, rag_tool=rag_tool,
                             reflection_agent=reflection_agent)
+
+
+def resume_engine(args, engine) -> None:
+    """Pick a previous run back up, if asked."""
+    run_id = getattr(args, "resume", "")
+    if not run_id:
+        return
+    state = engine.resume(run_id)
+    if not state["books"]:
+        print(f"[warn] nothing stored for run '{run_id}' - starting fresh under that id. "
+              f"Known runs: {', '.join(engine.assets_db.books_in_run(run_id)) or 'none'}")
+        return
+    books = ", ".join(f"{k.replace('_llm_v1', '').replace('_llm_v2', '')} ${v:,.0f}"
+                      for k, v in state["books"].items() if k in engine.agent_books)
+    print(f"resumed {run_id}: {state['cycles_before']} cycles already run | books {books} | "
+          f"{sum(state['reflections'].values())} reflections, "
+          f"{sum(state['prior_trades'].values())} prior trades carried over")
 
 
 def print_report(report: dict) -> None:
@@ -197,6 +215,7 @@ def cmd_backtest(args) -> None:
               f"top={top.get('ticker','-'):4} {top.get('direction','-'):5} "
               f"agree={c['mean_agreement']:.2f}", flush=True)
 
+    resume_engine(args, engine)
     report = engine.run_backtest(args.start, args.end, step_days=args.step_days,
                                  max_cycles=args.max_cycles,
                                  on_cycle=None if args.quiet else progress)
@@ -220,6 +239,7 @@ def cmd_live(args) -> None:
             print(f"      {f['ticker']:5} {f['direction']:5} {f['expected_return_bps']:+8.1f}bps "
                   f"conf={f['confidence']:.2f} agree={f['agreement']:.2f}")
 
+    resume_engine(args, engine)
     report = engine.run_live(interval_minutes=args.interval, cycles=args.cycles,
                              on_cycle=None if args.quiet else progress)
     print_report(report)
@@ -376,6 +396,9 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--memory-scope", choices=["run", "global"], default="run",
                         help="'run' keeps memory inside this run; 'global' remembers earlier runs")
         sp.add_argument("--quiet", action="store_true")
+        sp.add_argument("--resume", default="",
+                        help="continue a previous run id: restores books, cycle count, "
+                             "trades and reflections (a 15-minute loop survives a restart)")
 
     bt = sub.add_parser("backtest", help="replay historical sessions")
     common(bt)

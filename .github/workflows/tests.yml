@@ -1,0 +1,24 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run tests
+        # Tests needing the headline store skip themselves; the BM25 index is in the repo.
+        run: python -m pytest "Agent persona/tests" -q
+      - name: Lint
+        run: |
+          pip install pyflakes
+          python -m pyflakes "Agent persona/src" "Agent persona/tests"

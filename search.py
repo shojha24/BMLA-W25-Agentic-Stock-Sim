@@ -1,3 +1,10 @@
+"""DEPRECATED research script.
+
+The agent-facing port of this logic lives in `Agent persona/src/tools/rag.py`
+(hybrid BM25 + dense, point-in-time cutoff, ticker filter, recency decay,
+recent/historical interleave). Kept for reference and for one-off retrieval
+experiments; run it from the repo root.
+"""
 import time
 import os
 import bm25s

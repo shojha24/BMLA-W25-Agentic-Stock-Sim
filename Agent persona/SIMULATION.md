@@ -224,6 +224,21 @@ historical intraday *news*, so a true 15-minute backtest over a long window is n
 with free data. What is possible, and what the project does: run the 15-minute loop live, and
 score it afterwards (below) as the bars print.
 
+## Resuming a run
+
+A 15-minute loop meant to run for days will be interrupted — a restart, a crash, or just the
+end of a session. Every book is snapshotted to `agent_assets.sqlite` each cycle, so a run can
+be picked back up:
+
+```bash
+python "Agent persona/src/simulate.py" live --interval 15 --cycles 20 --resume run_20260902T175750_7c6a
+```
+
+That restores each agent's cash and positions, the consensus and benchmark books, the cycle
+counter and the equity curves. Trades and reflections come back for free — they are keyed by
+`run_id`, and the resumed run keeps it. Without `--resume` a run starts flat, which is correct
+for a backtest and wrong for a live loop that was already running yesterday.
+
 ## Scoring a finished run
 
 A live forecast cannot be judged when it is made — the next 15 minutes have not happened yet.

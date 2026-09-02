@@ -69,5 +69,14 @@ class AssetsDB:
             "WHERE run_id=? AND agent_id=? ORDER BY cycle", (run_id, agent_id)).fetchall()
         return [dict(r) for r in rows]
 
+    def max_cycle(self, run_id: str) -> int:
+        row = self._conn().execute(
+            "SELECT MAX(cycle) FROM agent_assets WHERE run_id=?", (run_id,)).fetchone()
+        return int(row[0] or 0)
+
+    def books_in_run(self, run_id: str) -> List[str]:
+        return [r[0] for r in self._conn().execute(
+            "SELECT DISTINCT agent_id FROM agent_assets WHERE run_id=?", (run_id,)).fetchall()]
+
     def equity_curve(self, run_id: str, agent_id: str) -> List[float]:
         return [r["equity"] for r in self.history(run_id, agent_id)]

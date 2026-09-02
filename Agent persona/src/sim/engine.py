@@ -146,6 +146,7 @@ class SimulationEngine:
         self.reflections_written = 0
         self.fills: List[Dict[str, Any]] = []
         self.cycle_index = 0
+        self.resumed_from: Dict[str, Any] = {}
 
     # ---------------- one cycle ----------------
 
@@ -300,6 +301,11 @@ class SimulationEngine:
             for name, book in self.agent_books.items():
                 self.assets_db.snapshot(self.run_id, self.cycle_index, timestamp,
                                         name, book, universe_prices)
+        # Consensus and benchmark books are snapshotted too, so `resume` restores
+        # the whole run rather than just the agents' private books.
+        for name, book in self.portfolios.items():
+            self.assets_db.snapshot(self.run_id, self.cycle_index, timestamp,
+                                    name, book, prices_now)
             self.fills.extend(cycle_fills)
             execution = summarize_fills(cycle_fills)
 
@@ -439,6 +445,49 @@ class SimulationEngine:
         """Index after the cycle has read its context, so this segment is 'old news'
         from the next cycle onward and never retrieves itself."""
         return self.live_index.add(news) if self.live_index is not None else 0
+
+    # ---------------- resume ----------------
+
+    def resume(self, run_id: str) -> Dict[str, Any]:
+        """Restart a run where it stopped: books, cycle counter, equity curves.
+
+        A 15-minute loop that runs for days will be interrupted - by a restart, a
+        crash, or simply the end of a session. Without this every restart began
+        flat at the starting cash, which makes the books meaningless past day one.
+        Reflections and past trades come back automatically: they are keyed by
+        run_id, and the resumed run keeps it.
+        """
+        self.run_id = run_id
+        self.log_path = self.log_dir / f"{run_id}.jsonl"
+
+        restored: Dict[str, Any] = {}
+        for name, book in list(self.agent_books.items()) + list(self.portfolios.items()):
+            row = self.assets_db.latest(run_id, name)
+            if not row:
+                continue
+            book.cash = float(row["cash"])
+            book.positions = {t: {"qty": float(p.get("qty", 0.0)),
+                                  "avg_price": float(p.get("avg_price", 0.0))}
+                              for t, p in (row["positions"] or {}).items()}
+            restored[name] = round(float(row["equity"]), 2)
+
+        # Seed the curves so metrics span the whole run, not just this session.
+        for name in self.agent_curves:
+            self.agent_curves[name] = list(self.assets_db.equity_curve(run_id, name))
+        for name in self.curves:
+            self.curves[name] = list(self.assets_db.equity_curve(run_id, name))
+
+        self.cycle_index = self.assets_db.max_cycle(run_id)
+        self.resumed_from = {
+            "run_id": run_id,
+            "cycles_before": self.cycle_index,
+            "books": restored,
+            "reflections": {name: self.reflection_store.count(name, run_id=run_id)
+                            for name in self.agent_books},
+            "prior_trades": {name: len(self.actions_db.last_trades(run_id, name, limit=1000))
+                             for name in self.agent_books},
+        }
+        return self.resumed_from
 
     # ---------------- drivers ----------------
 
@@ -587,6 +636,7 @@ class SimulationEngine:
                 "per_agent": self.actions_db.summary(self.run_id),
             },
             "agent_equity_curves": {k: [round(v, 2) for v in c] for k, c in self.agent_curves.items()},
+            "resumed_from": self.resumed_from,
             "skipped": self.skipped,
             "log_path": str(self.log_path),
             "actions_db": str(self.actions_db.db_path),

@@ -61,6 +61,7 @@ ignored by python-dotenv, which is why the LLM path used to fail with "API key n
 | Per-cycle JSONL run log + run report | ✅ `Agent persona/data/runs/` |
 | Intraday horizons (15m/30m/1h) on real 15-minute bars | ✅ `--horizon 15m`, last ~60 days |
 | Scoring a live run after the fact | ✅ `simulate.py score` |
+| Resuming an interrupted run (books, trades, memory) | ✅ `--resume <run_id>` |
 | Sim-vs-actual comparison (regime, direction, magnitude bias) | ✅ in every report |
 | Intraday *backtesting* over a long window | ❌ no free source of historical intraday news |
 
@@ -97,10 +98,14 @@ Standalone experiments; the agent-facing port of this logic lives in `Agent pers
 `rag_prep/` holds the ingestion pipeline (see `rag_prep/README.md`); those scripts expect to be
 run from the repo root and do not need re-running.
 
+## CI
+
+`.github/workflows/tests.yml` runs the suite and pyflakes on every push and pull request.
+
 ## Tests
 
 ```bash
 python -m pytest "Agent persona/tests" -q
 ```
 
-191 tests, no network required.
+201 tests, no network required.
