@@ -1,7 +1,5 @@
 import json
 
-import pytest
-
 from agents.town_crier import TownCrierAgent
 from data.digest_builder import HeuristicDigestBuilder
 from data.news_feed import NewsItem

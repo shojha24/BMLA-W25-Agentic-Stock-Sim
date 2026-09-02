@@ -89,9 +89,16 @@ class MockChatClient:
         return json.dumps(self._respond(persona_key, payload))
 
     def _respond(self, persona_key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        digest = payload.get("news_digest") or []
+        # Agents receive either a raw digest or a 15-Minute Brief that nests it.
+        brief = payload.get("brief") or {}
+        digest = payload.get("news_digest") or brief.get("news_digest") or []
         state = payload.get("state") or {}
-        timestamp = payload.get("timestamp") or ""
+        if not state and brief.get("your_balance"):
+            balance = brief["your_balance"]
+            state = {"cash_usd": balance.get("cash_usd", 0.0),
+                     "positions": balance.get("positions", {}),
+                     "prices": balance.get("prices", {})}
+        timestamp = payload.get("timestamp") or brief.get("timestamp") or ""
         universe = list((state.get("prices") or {}).keys())
 
         weight = sum(_SENTIMENT.get(str(i.get("sentiment", "")).upper(), 0.0)

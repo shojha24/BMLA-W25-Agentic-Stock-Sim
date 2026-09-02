@@ -107,19 +107,23 @@ portfolio. See `SIMULATION.md` for feeds, benchmarks, metrics, ablations and the
 src/
   simulate.py              backtest / live / ablate
   agents/  town_crier.py   summarizes the segment, writes the retrieval questions
+           reflection.py   end-of-day self-review, written to private memory
   data/    news_feed.py market_data.py digest_builder.py
   sim/     brief.py portfolio.py execution.py engine.py actions_db.py assets_db.py
-  tools/   rag.py news_index.py headline_store.py
+  tools/   rag.py news_index.py reflection_store.py headline_store.py
   eval/    metrics.py benchmarks.py
 ```
 
 Each cycle the Town Crier summarizes the news and writes the retrieval questions; retrieval
 runs once for the desk; each agent reads a 15-Minute Brief carrying its own balance, its own
 last trades (rejections included), what its peers did, and the historical context; then places
-real orders against its own book through a market simulator. See `SIMULATION.md`.
+real orders against its own book through a market simulator. At the end of the cycle each
+agent reflects on its previous day — judged by what the market actually did — into a private
+memory that is recalled into its own later briefs. See `SIMULATION.md`.
 
 ## Not built yet
 
 Intraday backtesting (there is no minute-bar history behind the 15-minute live loop),
-borrow costs and slippage beyond a flat per-notional charge, and any news source past
-2020-06-11 for replay.
+borrow costs and slippage beyond a flat per-notional charge, any news source past 2020-06-11
+for replay, and endogenous price formation (the market simulator fills against real prices;
+`ExecutionVenue` is the seam where an order book would go).

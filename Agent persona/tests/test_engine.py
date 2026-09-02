@@ -258,3 +258,62 @@ def test_historical_context_never_returns_the_current_segment(prices, feed, tmp_
         segment_ids = {i["news_id"] for i in record["digest"]["news_digest"]}
         context_ids = {d["doc_id"] for d in record["historical_context"]["documents"]}
         assert not (segment_ids & context_ids)
+
+
+def test_reflections_are_written_and_recalled_into_later_briefs(prices, feed, tmp_path):
+    engine = make_engine(prices, feed, tmp_path)
+    briefs = []
+    original = engine.panel.run
+
+    def spy(digest, state, state_by_agent=None, brief_by_agent=None, **kw):
+        briefs.append(brief_by_agent or {})
+        return original(digest, state, state_by_agent=state_by_agent,
+                        brief_by_agent=brief_by_agent, **kw)
+
+    engine.panel.run = spy
+    report = engine.run_backtest("2016-01-04", "2016-01-19")
+
+    assert report["reflection"]["written"] > 0
+    assert engine.reflection_store.count("macro_econ_llm_v2") > 0
+    # the loop closes: nothing to recall at the start, lessons later
+    assert briefs[0]["macro_econ_llm_v2"]["your_reflections"] == []
+    assert any(b["macro_econ_llm_v2"]["your_reflections"] for b in briefs[2:])
+
+
+def test_an_agent_never_sees_another_agents_reflections(prices, feed, tmp_path):
+    engine = make_engine(prices, feed, tmp_path)
+    briefs = []
+    original = engine.panel.run
+
+    def spy(digest, state, state_by_agent=None, brief_by_agent=None, **kw):
+        briefs.append(brief_by_agent or {})
+        return original(digest, state, state_by_agent=state_by_agent,
+                        brief_by_agent=brief_by_agent, **kw)
+
+    engine.panel.run = spy
+    engine.run_backtest("2016-01-04", "2016-01-19")
+
+    for brief_set in briefs:
+        for agent, brief in brief_set.items():
+            for lesson in brief["your_reflections"]:
+                stored = engine.reflection_store.latest(agent, limit=50)
+                assert lesson["lesson"] in {s["lesson"] for s in stored}
+
+
+def test_a_reflection_only_uses_outcomes_that_already_happened(prices, feed, tmp_path):
+    """Reflection is deferred one cycle: a day is judged after the market moves."""
+    engine = make_engine(prices, feed, tmp_path)
+    engine.run_backtest("2016-01-04", "2016-01-19")
+    days = [r["day"] for r in engine.reflection_store.latest("macro_econ_llm_v2", limit=50)]
+    cycle_days = [c["day"] for c in engine.cycles]
+    assert days
+    # every reflected day is a cycle that already ran
+    assert set(days).issubset(set(cycle_days))
+
+
+def test_reflection_can_be_switched_off(prices, feed, tmp_path):
+    engine = make_engine(prices, feed, tmp_path)
+    engine.config.reflect = False
+    report = engine.run_backtest("2016-01-04", "2016-01-19")
+    assert report["reflection"]["written"] == 0
+    assert engine.reflection_store.count() == 0

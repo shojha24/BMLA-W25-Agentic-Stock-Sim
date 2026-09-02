@@ -22,6 +22,7 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from agents.baseline import SentimentBaselineAgent          # noqa: E402
+from agents.reflection import ReflectionAgent               # noqa: E402
 from agents.town_crier import TownCrierAgent                # noqa: E402
 from agents.persona import LLMPersonaAgent                  # noqa: E402
 from agents.personas import DEFAULT_PANEL, PERSONAS         # noqa: E402
@@ -86,6 +87,8 @@ def make_engine(args, universe, panel=None, rag_tool=None, run_id="", benchmarks
         lookback_hours=args.lookback_hours, agent_cash=args.agent_cash,
         trade_agent_books=not args.no_agent_books, use_briefs=not args.no_briefs,
         index_live_news=not args.no_live_index, context_top_k=args.context_top_k,
+        reflect=not args.no_reflections, reflections_top_k=args.reflections_top_k,
+        memory_scope=args.memory_scope,
     )
 
     # The Town Crier writes the segment summary and the retrieval questions. It uses
@@ -97,6 +100,14 @@ def make_engine(args, universe, panel=None, rag_tool=None, run_id="", benchmarks
     town_crier = TownCrierAgent(builder, client=crier_client, model=args.model,
                                 use_llm=crier_mode == "llm",
                                 max_context_docs=args.context_top_k)
+
+    # End-of-day reflection: same default policy as the Town Crier.
+    reflect_mode = args.reflection_mode
+    if reflect_mode == "auto":
+        reflect_mode = "llm" if args.mode == "llm" else "heuristic"
+    reflection_agent = ReflectionAgent(
+        client=make_client(args.mode, args.horizon) if reflect_mode == "llm" else None,
+        model=args.model, use_llm=reflect_mode == "llm")
     execution_config = ExecutionConfig(
         cost_bps=args.cost_bps, slippage_bps=args.slippage_bps,
         allow_short=args.agents_may_short,      # off by default: buy/sell of held shares only
@@ -109,7 +120,8 @@ def make_engine(args, universe, panel=None, rag_tool=None, run_id="", benchmarks
                             run_id=run_id,
                             venue=MarketFillVenue(execution_config),
                             execution_config=execution_config,
-                            town_crier=town_crier, rag_tool=rag_tool)
+                            town_crier=town_crier, rag_tool=rag_tool,
+                            reflection_agent=reflection_agent)
 
 
 def print_report(report: dict) -> None:
@@ -141,6 +153,12 @@ def print_report(report: dict) -> None:
         print(f"\nbriefing: {'on' if br.get('enabled') else 'off'} | town crier {br.get('town_crier')} "
               f"| {br.get('mean_context_docs')} context docs/cycle "
               f"| live index {br.get('live_index_rows')} rows")
+
+    rf = report.get("reflection", {})
+    if rf:
+        per_agent = ", ".join(f"{k.split('_llm')[0]} {v}" for k, v in rf.get("per_agent", {}).items())
+        print(f"reflections: {'on' if rf.get('enabled') else 'off'} | {rf.get('reflector')} "
+              f"| {rf.get('written')} written ({per_agent})")
 
     ex = report.get("execution", {})
     if ex.get("totals", {}).get("n_orders"):
@@ -296,6 +314,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="do not index this run's news for later retrieval")
         sp.add_argument("--context-top-k", type=int, default=8,
                         help="documents retrieved for the brief's historical context")
+        sp.add_argument("--reflection-mode", choices=["auto", "llm", "heuristic"], default="auto",
+                        help="who writes the end-of-day reflection")
+        sp.add_argument("--no-reflections", action="store_true",
+                        help="ablation: agents keep no memory of their own past days")
+        sp.add_argument("--reflections-top-k", type=int, default=3,
+                        help="past lessons recalled into each brief")
+        sp.add_argument("--memory-scope", choices=["run", "global"], default="run",
+                        help="'run' keeps memory inside this run; 'global' remembers earlier runs")
         sp.add_argument("--quiet", action="store_true")
 
     bt = sub.add_parser("backtest", help="replay historical sessions")

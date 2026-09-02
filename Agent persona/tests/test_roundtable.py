@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from agents.base import BaseAgent
@@ -125,3 +127,23 @@ def test_baseline_agent_emits_valid_order_records(digest, state):
         assert order["side"] in ("BUY", "SELL")
         assert order["qty"] > 0
         assert order["ticker"] in state["prices"]
+
+
+def test_mock_client_reads_a_brief_shaped_payload():
+    """The brief nests the digest; a mock that misses it silently forecasts FLAT."""
+    client = MockChatClient()
+    brief = {
+        "timestamp": "2016-06-24T20:00:00Z",
+        "news_digest": [{"news_id": "n1", "headline": "CPI hot", "summary": "",
+                         "tickers_mentioned": ["SPY"], "macro_tags": ["CPI"],
+                         "sentiment": "BEARISH", "confidence": 0.9}],
+        "your_balance": {"cash_usd": 50000.0, "positions": {},
+                         "prices": {"SPY": 200.0, "TLT": 100.0}},
+    }
+    out = json.loads(client.chat("mock", [
+        {"role": "system", "content": "Macro Economist"},
+        {"role": "user", "content": json.dumps({"brief": brief})},
+    ]))
+    assert out["forecasts"], "no forecasts produced from a brief payload"
+    assert any(f["direction"] != "FLAT" for f in out["forecasts"])
+    assert out["actions"] or out["market_view"]["risk_regime"] == "RISK_OFF"

@@ -16,7 +16,7 @@ news feed ──► Town Crier ──► segment summary + stocks + RAG-Qs
      │                        │  your last trades  (Agent Actions)  │
      │                        │  peers' actions    (Agent Actions)  │
      │                        │  historical context                 │
-     │                        │  your reflections  (Phase 3, empty) │
+     │                        │  your reflections  (Reflections)    │
      │                        │  order instructions + ceilings      │
      │                        └──────────────┬──────────────────────┘
      │                                       ▼
@@ -32,6 +32,11 @@ news feed ──► Town Crier ──► segment summary + stocks + RAG-Qs
      │                                          per-agent books ──► actions.sqlite  (public)
      └──► indexed into the live news index ◄──┘              └──► agent_assets.sqlite (private)
           (after retrieval, so a cycle never cites itself as history)
+
+   end of cycle: the PREVIOUS cycle's trades are now judged by the market
+        ──► each agent reflects on its own day ──► reflections.sqlite (private, per agent)
+                                                          │
+                                    recalled into that agent's next brief ◄┘
 ```
 
 Two books run side by side and are reported together:
@@ -93,7 +98,7 @@ One brief per agent per cycle, assembled from four sources:
 | `your_last_trades` — including rejected orders **and why** | Agent Actions DB |
 | `peer_recent_actions` — what the others *did*, not what they said | Agent Actions DB (public) |
 | `historical_context` — summary, documents, questions asked | central retrieval |
-| `your_reflections` | Phase 3; the slot exists and stays empty |
+| `your_reflections` | Reflections store (private, this agent only) |
 | `order_instructions` — the rules, plus `you_can_sell_at_most` and `you_can_buy_at_most` | execution config + book |
 
 The last row matters: the ceilings are computed for the model rather than left to its
@@ -113,6 +118,34 @@ collection so both tiers stay in step.
 
 Indexing happens **after** the cycle retrieves, so a segment is never returned as its own
 historical context. From the next cycle onward it is. `--no-live-index` disables it.
+
+## Reflection: the agents' private memory
+
+At the end of each cycle every agent reads its own day back — the orders it sent (fills and
+refusals), the forecasts it made, what the market then did, and what happened to its book — and
+writes a lesson. Those lessons go into `data/runs/reflections.sqlite` (Vector Store 2), and are
+retrieved into that agent's next brief using the Town Crier's *insight* questions.
+
+**Reflection is deferred by one cycle, on purpose.** A day's trades cannot be judged until the
+market has moved, so the engine parks each cycle's activity and settles it once the outcome is
+on the tape. A reflection therefore never contains information the agent could not have had.
+
+**The store is private, and that is enforced rather than assumed**: every read is scoped to one
+`agent_id`, in SQLite and in the Chroma metadata filter alike. If the personas shared a memory
+they would converge, and a panel that cannot disagree is an expensive single agent.
+
+A real lesson from a Brexit-window run:
+
+> *"Right on GLD (+490 bps) but sized too small to overcome spread/commissions, finishing
+> −$39.50. As a contrarian fading post-Brexit panic, I correctly identified gold as a fear bid
+> but my 0.55 confidence capped position size when the move was large and obvious."*
+> — `contrarian_value_llm_v1`, tags `RISK_OFF, POSITION_SIZING, GOLD_HEDGE, BREXIT_REACTION`
+
+Flags: `--reflection-mode llm|heuristic|auto`, `--reflections-top-k N`, `--no-reflections`
+(the ablation: agents with no memory of their own past days).
+
+A day with no trades and no open positions produces no reflection — there is nothing to learn
+from having done nothing.
 
 ## Orders and the market simulator
 

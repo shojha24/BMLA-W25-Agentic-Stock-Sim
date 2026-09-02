@@ -20,6 +20,7 @@ from core.io import append_jsonl, save_json
 from data.market_data import PriceStore, horizon_to_sessions
 from eval.benchmarks import NaiveForecaster
 from eval.metrics import score_forecasts, summarize_equity, summarize_forecasts
+from agents.reflection import DayRecord, ReflectionAgent
 from agents.town_crier import SegmentBrief, TownCrierAgent
 from orchestration.roundtable import Roundtable
 from sim.actions_db import ActionsDB
@@ -28,6 +29,7 @@ from sim.brief import BriefAssembler, BriefConfig
 from sim.execution import ExecutionConfig, ExecutionVenue, MarketFillVenue, summarize_fills
 from sim.portfolio import Portfolio, target_weights
 from tools.news_index import LiveNewsIndex
+from tools.reflection_store import ReflectionStore
 
 INDEX_TICKER = "SPY"
 
@@ -57,6 +59,13 @@ class EngineConfig:
     use_briefs: bool = True
     index_live_news: bool = True
     context_top_k: int = 8
+    # Phase 3: end-of-day reflection, stored privately per agent and retrieved
+    # back into the brief.
+    reflect: bool = True
+    reflections_top_k: int = 3
+    # "run" keeps each run's memory to itself (reproducible ablations);
+    # "global" lets agents remember earlier runs in the same store.
+    memory_scope: str = "run"
 
 
 class SimulationEngine:
@@ -75,6 +84,7 @@ class SimulationEngine:
         town_crier: Optional[TownCrierAgent] = None,
         rag_tool: Optional[Any] = None,
         brief_config: Optional[BriefConfig] = None,
+        reflection_agent: Optional[ReflectionAgent] = None,
     ):
         self.panel = panel
         self.feed = feed
@@ -124,6 +134,13 @@ class SimulationEngine:
             if rag_tool is not None and getattr(rag_tool, "live_index", None) is None:
                 rag_tool.live_index = self.live_index      # retrieval sees this run's news
         self.segments: List[Dict[str, Any]] = []
+
+        # --- Phase 3: private reflection memory ---
+        self.reflection_agent = reflection_agent or ReflectionAgent(use_llm=False)
+        self.reflection_store = ReflectionStore(self.log_dir / "reflections.sqlite")
+        self.personas = {a.name: getattr(a, "persona", a.name) for a in self.panel.agents}
+        self.pending_reflections: Dict[str, DayRecord] = {}
+        self.reflections_written = 0
         self.fills: List[Dict[str, Any]] = []
         self.cycle_index = 0
 
@@ -186,7 +203,7 @@ class SimulationEngine:
                     run_id=self.run_id, cycle=self.cycle_index,
                     historical_context=context["summary"],
                     historical_docs=context["documents"],
-                    reflections=[],                     # Phase 3 fills this
+                    reflections=self._recall(name, segment, day),
                     order_instructions={
                         "max_order_pct_equity": self.exec_config.max_order_pct_equity,
                         "shorting_allowed": self.exec_config.allow_short,
@@ -258,6 +275,9 @@ class SimulationEngine:
             self.fills.extend(cycle_fills)
             execution = summarize_fills(cycle_fills)
 
+        reflections_now = self._settle_reflections(realized, universe_prices)
+        self._hold_for_reflection(final_outputs, cycle_fills, universe_prices, day, timestamp)
+
         indexed = self._index_segment(news)
 
         if table.get("revision"):
@@ -271,6 +291,11 @@ class SimulationEngine:
             "segment": segment.to_dict(),
             "historical_context": context,
             "news_indexed": indexed,
+            "reflections_written": reflections_now,
+            "reflections_recalled": {
+                name: len((brief_by_agent or {}).get(name, {}).get("your_reflections", []))
+                for name in self.agent_books
+            } if brief_by_agent else {},
             "digest": digest,
             "prices": prices_now,
             "consensus": table["consensus"],
@@ -317,6 +342,66 @@ class SimulationEngine:
         docs = docs[: self.config.context_top_k]
         summary = self.town_crier.summarize_context(docs, "; ".join(questions[:2]))
         return {"summary": summary, "documents": docs, "questions": questions}
+
+    def _recall(self, agent_name: str, segment: SegmentBrief, day: str) -> List[Dict[str, Any]]:
+        """Vector Store 2 read: this agent's own lessons from similar setups."""
+        if not self.config.reflect:
+            return []
+        questions = segment.rag_questions.get("insights") or []
+        query = " ".join(questions) or segment.summary
+        scope = self.run_id if self.config.memory_scope == "run" else None
+        found = self.reflection_store.search(
+            agent_name, query, top_k=self.config.reflections_top_k, before_day=day,
+            run_id=scope)
+        if not found:
+            # Nothing matched the wording; fall back to the most recent lessons.
+            found = self.reflection_store.latest(
+                agent_name, limit=self.config.reflections_top_k, before_day=day, run_id=scope)
+        return [{k: r[k] for k in ("day", "lesson", "what_worked", "what_failed",
+                                   "tags", "tickers", "pnl_usd")} for r in found]
+
+    def _hold_for_reflection(self, outputs: Sequence[Dict[str, Any]],
+                             fills: Sequence[Dict[str, Any]], prices: Dict[str, float],
+                             day: str, timestamp: str) -> None:
+        """Park this cycle's activity until the market has judged it."""
+        if not self.config.reflect:
+            return
+        for out in outputs:
+            name = out["agent_name"]
+            book = self.agent_books.get(name)
+            if book is None:
+                continue
+            self.pending_reflections[name] = DayRecord(
+                agent_id=name, persona=self.personas.get(name, name), day=day,
+                timestamp=timestamp,
+                trades=[f for f in fills if f["agent_id"] == name],
+                forecasts=list(out.get("forecasts") or []),
+                equity=book.equity(prices),
+                positions={t: dict(p) for t, p in book.positions.items()},
+            )
+
+    def _settle_reflections(self, realized_bps: Dict[str, float],
+                            prices: Dict[str, float]) -> int:
+        """Write reflections for the previous cycle, now that its outcome is known.
+
+        Reflecting a cycle late is deliberate: judging a day's trades needs the
+        move that followed them, which did not exist when they were placed.
+        """
+        if not self.config.reflect or not self.pending_reflections:
+            return 0
+        written = 0
+        for name, record in list(self.pending_reflections.items()):
+            book = self.agent_books.get(name)
+            if book is None:
+                continue
+            reflection = self.reflection_agent.reflect(record, realized_bps, book.equity(prices))
+            if reflection:
+                self.reflection_store.add(self.run_id, name, record.day, record.timestamp,
+                                          reflection)
+                written += 1
+        self.pending_reflections.clear()
+        self.reflections_written += written
+        return written
 
     def _index_segment(self, news: Sequence[Any]) -> int:
         """Index after the cycle has read its context, so this segment is 'old news'
@@ -368,6 +453,17 @@ class SimulationEngine:
             self.curves[name].append(pf.equity(final_prices))
         for name, book in self.agent_books.items():
             self.agent_curves[name].append(book.equity(final_prices))
+
+        # Settle the last cycle's reflection now that its outcome is on the tape.
+        if self.pending_reflections:
+            settle_day = self.cycles[-1]["day"] if self.cycles else last_day
+            sessions_ahead = horizon_to_sessions(cfg.horizon)
+            last_realized = {}
+            for ticker in cfg.universe:
+                value = self.prices.forward_return_bps(ticker, settle_day, sessions_ahead)
+                if value is not None:
+                    last_realized[ticker] = value
+            self._settle_reflections(last_realized, final_prices)
 
         return self.report(mode="backtest", window={"start": start, "end": end,
                                                     "cycles": len(self.cycles),
@@ -427,6 +523,15 @@ class SimulationEngine:
             },
             "feed": self.feed.describe() if hasattr(self.feed, "describe") else {},
             "digest_builder": getattr(self.digest_builder, "name", "unknown"),
+            "reflection": {
+                "enabled": self.config.reflect,
+                "reflector": "llm" if self.reflection_agent.use_llm else "heuristic",
+                "written": self.reflections_written,
+                "scope": self.config.memory_scope,
+                "per_agent": {name: self.reflection_store.count(name, run_id=self.run_id)
+                              for name in self.agent_books},
+                "store": str(self.reflection_store.db_path),
+            },
             "briefing": {
                 "enabled": self.config.use_briefs,
                 "town_crier": "llm" if self.town_crier.use_llm else "heuristic",
