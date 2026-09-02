@@ -46,6 +46,10 @@ ignored by python-dotenv, which is why the LLM path used to fail with "API key n
 | Daily prices, portfolio simulation with costs and shorts | ✅ `data/market_data.py`, `sim/portfolio.py` |
 | Agents place real orders into a market simulator, one book each | ✅ `sim/execution.py`, per-agent `Portfolio` |
 | Public All-Agent-Actions DB + private Agent-Assets DB | ✅ `sim/actions_db.py`, `sim/assets_db.py` |
+| Town Crier: segment summary + generated retrieval questions | ✅ `agents/town_crier.py` |
+| 15-Minute Brief per agent (balance, last trades, peers, context) | ✅ `sim/brief.py` |
+| This run's news indexed for later retrieval | ✅ `tools/news_index.py` (FTS5 + optional Chroma) |
+| Per-agent reflection memory (end-of-day) | ❌ Phase 3 — the brief slot exists, empty |
 | Scoring vs realized returns; index + 5 naive benchmarks | ✅ `eval/` - hit rate, Brier, MAE, Sharpe, drawdown |
 | Ablations (RAG on/off, communication on/off, 1 agent vs 3) | ✅ `simulate.py ablate` |
 | Per-cycle JSONL run log + run report | ✅ `Agent persona/data/runs/` |
@@ -90,4 +94,4 @@ run from the repo root and do not need re-running.
 python -m pytest "Agent persona/tests" -q
 ```
 
-119 tests, no network required.
+154 tests, no network required.

@@ -22,9 +22,11 @@ def _run_one(
     state: State,
     peer_context: Optional[List[Dict[str, Any]]],
     prior_output: Optional[AgentOutput],
+    brief: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     try:
-        out = agent.run(digest, state, peer_context=peer_context, prior_output=prior_output)
+        out = agent.run(digest, state, peer_context=peer_context, prior_output=prior_output,
+                        brief=brief)
         return {"ok": True, "agent": agent.name, "output": out, "error": ""}
     except Exception as exc:  # a flaky free-tier model must not kill the panel
         return {"ok": False, "agent": agent.name, "output": None, "error": f"{type(exc).__name__}: {exc}"}
@@ -113,6 +115,7 @@ class Roundtable:
         peer_by_agent: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         prior_by_agent: Optional[Dict[str, AgentOutput]] = None,
         state_by_agent: Optional[Dict[str, State]] = None,
+        brief_by_agent: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         jobs = [
             (
@@ -121,25 +124,29 @@ class Roundtable:
                 (state_by_agent or {}).get(a.name, state),
                 (peer_by_agent or {}).get(a.name),
                 (prior_by_agent or {}).get(a.name),
+                (brief_by_agent or {}).get(a.name),
             )
             for a in self.agents
         ]
         if not self.parallel or len(jobs) == 1:
-            return [_run_one(a, digest, st, peers, prior) for a, st, peers, prior in jobs]
+            return [_run_one(a, digest, st, peers, prior, brief)
+                    for a, st, peers, prior, brief in jobs]
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
-            futures = [pool.submit(_run_one, a, digest, st, peers, prior)
-                       for a, st, peers, prior in jobs]
+            futures = [pool.submit(_run_one, a, digest, st, peers, prior, brief)
+                       for a, st, peers, prior, brief in jobs]
             return [f.result() for f in futures]
 
     def run(self, digest: Digest, state: State,
-            state_by_agent: Optional[Dict[str, State]] = None) -> Dict[str, Any]:
-        """`state_by_agent` gives each agent its own book; `state` is the fallback."""
+            state_by_agent: Optional[Dict[str, State]] = None,
+            brief_by_agent: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """`state_by_agent` gives each agent its own book; `brief_by_agent` its brief."""
         timestamp = str(digest.get("timestamp", ""))
         rounds: List[Dict[str, Any]] = []
         errors: List[Dict[str, str]] = []
 
-        results = self._run_round(digest, state, state_by_agent=state_by_agent)
+        results = self._run_round(digest, state, state_by_agent=state_by_agent,
+                                  brief_by_agent=brief_by_agent)
         outputs = [r["output"] for r in results if r["ok"]]
         errors += [{"agent": r["agent"], "error": r["error"]} for r in results if not r["ok"]]
         if not outputs:
@@ -160,7 +167,8 @@ class Roundtable:
                 for a in self.agents
             }
             results = self._run_round(digest, state, peer_by_agent, prior_by_agent,
-                                      state_by_agent=state_by_agent)
+                                      state_by_agent=state_by_agent,
+                                      brief_by_agent=brief_by_agent)
             outputs = [r["output"] for r in results if r["ok"]]
             errors += [{"agent": r["agent"], "error": r["error"]} for r in results if not r["ok"]]
             if not outputs:

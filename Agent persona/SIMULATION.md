@@ -3,18 +3,35 @@
 ## One cycle
 
 ```
-news feed ──► digest builder ──► agent panel ──► consensus ──► score vs realized move
-(archive |     (heuristic |      (roundtable,          │
- yahoo |        LLM)             2 rounds, each        └────► target weights ──► consensus book
- finnhub)                        agent sees its
-                                 own balance sheet)
-                                        │
-                                        └─► each agent's own orders
-                                                  │
-                                             market simulator ──► per-agent books
-                                             (cash / holdings /        │
-                                              caps / cooldown)         ├─► actions.sqlite  (public)
-                                                                       └─► agent_assets.sqlite (private)
+news feed ──► Town Crier ──► segment summary + stocks + RAG-Qs
+(archive |    (LLM or                    │
+ yahoo |       heuristic)                ├──► doc retrieval (once, for the desk)
+ finnhub)                                │      archive BM25 (+Chroma) + this run's live index
+     │                                   │              │
+     │                                   │      Town Crier condenses ──► Historical Context
+     │                                   ▼
+     │                        ┌── 15-Minute Brief (one per agent) ──┐
+     │                        │  news summary + digest              │
+     │                        │  your balance      (Agent Assets)   │
+     │                        │  your last trades  (Agent Actions)  │
+     │                        │  peers' actions    (Agent Actions)  │
+     │                        │  historical context                 │
+     │                        │  your reflections  (Phase 3, empty) │
+     │                        │  order instructions + ceilings      │
+     │                        └──────────────┬──────────────────────┘
+     │                                       ▼
+     │                          agent panel (roundtable, 2 rounds)
+     │                                       │
+     │                     ┌─────────────────┴──────────────────┐
+     │                     ▼                                    ▼
+     │              consensus forecast                   each agent's orders
+     │                     │                                    │
+     │            score vs realized move             market simulator (cash / holdings /
+     │                     │                          caps / cooldown / slippage)
+     │            target weights ──► consensus book          │
+     │                                          per-agent books ──► actions.sqlite  (public)
+     └──► indexed into the live news index ◄──┘              └──► agent_assets.sqlite (private)
+          (after retrieval, so a cycle never cites itself as history)
 ```
 
 Two books run side by side and are reported together:
@@ -47,6 +64,55 @@ index benchmark.
 Daily adjusted closes from the public Yahoo chart endpoint, cached to `dataset/prices/*.csv`.
 No API key, no extra dependency. Forecasts are scored on close-to-close forward returns in
 basis points, which is also what the portfolio marks against.
+
+## The Town Crier
+
+One agent reads the raw segment so the traders do not have to. It produces:
+
+* **summary** — 2–4 sentences on what happened and what it plausibly means.
+* **stocks** — which universe tickers the segment actually bears on.
+* **RAG-Qs** — the retrieval questions: up to 4 about historical news, up to 3 about the
+  agents' own past performance (the second set is what Phase 3's reflection store will answer).
+
+Retrieval then runs **once for the desk** on those questions, and the Town Crier condenses the
+result into the brief's Historical Context. Before this, every agent hand-rolled a query string
+and read raw headlines.
+
+`--town-crier llm|heuristic|auto` (auto = LLM when the panel uses one). The heuristic path is
+deterministic frequency counting and costs nothing, so long backtests are not forced to pay
+for it.
+
+## The 15-Minute Brief
+
+One brief per agent per cycle, assembled from four sources:
+
+| section | source |
+|---|---|
+| `news_summary`, `stocks_discussed`, `news_digest` | Town Crier |
+| `your_balance` (cash, positions, market value, unrealized P&L) | Agent Assets DB (private) |
+| `your_last_trades` — including rejected orders **and why** | Agent Actions DB |
+| `peer_recent_actions` — what the others *did*, not what they said | Agent Actions DB (public) |
+| `historical_context` — summary, documents, questions asked | central retrieval |
+| `your_reflections` | Phase 3; the slot exists and stays empty |
+| `order_instructions` — the rules, plus `you_can_sell_at_most` and `you_can_buy_at_most` | execution config + book |
+
+The last row matters: the ceilings are computed for the model rather than left to its
+arithmetic. Adding them and one sharp long-only sentence took a real LLM run from a 33% fill
+rate (agents trying to sell what they did not own) to 100%.
+
+`--no-briefs` reverts to the old path — raw digest, each agent retrieving for itself — which
+makes "does the brief help?" an ablation rather than an assumption.
+
+## Live news index
+
+The archive stops at 2020-06-11, so a run's own news would otherwise be invisible to retrieval.
+Every cycle's headlines are written to `data/runs/live_news.sqlite` (SQLite FTS5, no key, no
+embedding cost) and fused into retrieval by RRF alongside the archive. When the ChromaDB store
+and `GOOGLE_API_KEY` are both present, `ChromaNewsWriter` also upserts them into the dense
+collection so both tiers stay in step.
+
+Indexing happens **after** the cycle retrieves, so a segment is never returned as its own
+historical context. From the next cycle onward it is. `--no-live-index` disables it.
 
 ## Orders and the market simulator
 

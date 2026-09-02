@@ -22,6 +22,23 @@ SHARED_SYSTEM = (
     "You must output ONLY a single valid JSON object: no markdown, no commentary."
 )
 
+BRIEF_BLOCK = """
+You are reading a 15-Minute Brief assembled for you:
+- brief.news_summary / news_digest: what just happened, per the desk's Town Crier.
+- brief.your_balance: YOUR cash, positions, unrealized P&L and the prices you can trade at.
+- brief.your_last_trades: your own recent orders, including any the venue refused and why.
+- brief.peer_recent_actions: what the other agents actually did (not what they said).
+- brief.historical_context: past episodes retrieved for this segment, and the questions asked.
+- brief.your_reflections: your own past lessons, when available.
+- brief.order_instructions: the rules your orders must satisfy, including
+  `you_can_sell_at_most` (shares you actually hold - selling more is refused) and
+  `you_can_buy_at_most` (shares your cash and position cap allow). These are hard
+  ceilings, already computed for you. An order past them is rejected, not trimmed
+  in your favour.
+
+Trade your own book, not the desk's: your balance is yours alone.
+"""
+
 OUTPUT_CONTRACT = """
 Output a SINGLE JSON object with exactly these keys:
 - "decision": one sentence stating your net stance.
@@ -52,7 +69,10 @@ Hard constraints on "forecasts" (your view, scored every cycle):
 Hard constraints on "actions" (real orders against your own book):
 - You may only BUY with the cash in state.cash_usd, at the prices in state.prices.
   An order you cannot pay for is cut down or rejected by the venue.
-- You may only SELL shares you actually hold in state.positions. No shorting.
+- You are long-only. You may only SELL a ticker that appears in
+  order_instructions.you_can_sell_at_most (or state.positions), and never more than
+  that number. A bearish view on something you do not hold is expressed by NOT buying
+  it - not by submitting a SELL that the venue will refuse.
 - qty is a whole number of shares. No single order may exceed {max_order_pct}% of your equity.
 - Trade when your own forecast is directional and you have the conviction for it;
   an empty list is acceptable when nothing clears your bar, but standing aside every
@@ -104,6 +124,7 @@ class LLMPersonaAgent(BaseAgent):
     ):
         self.spec = spec
         self.max_order_pct_equity = max_order_pct_equity
+        self.uses_brief = False
         self.name = spec.name
         self.persona = spec.persona
         self.client = client
@@ -156,6 +177,7 @@ class LLMPersonaAgent(BaseAgent):
     # ---------------- prompting ----------------
 
     def _developer_prompt(self, revision: bool) -> str:
+        # set per call in run(); the prompt differs when a brief is supplied
         contract = (OUTPUT_CONTRACT
                     .replace("{horizon}", self.spec.default_horizon)
                     .replace("{max_order_pct}", str(int(self.max_order_pct_equity * 100))))
@@ -164,6 +186,8 @@ class LLMPersonaAgent(BaseAgent):
             self.spec.mandate.strip(),
             contract,
         ]
+        if self.uses_brief:
+            blocks.insert(2, BRIEF_BLOCK.strip())
         if revision:
             blocks.append(REVISION_BLOCK)
         return "\n\n".join(blocks)
@@ -191,25 +215,43 @@ class LLMPersonaAgent(BaseAgent):
         state: State,
         peer_context: Optional[List[Dict[str, Any]]] = None,
         prior_output: Optional[AgentOutput] = None,
+        brief: Optional[Dict[str, Any]] = None,
     ) -> AgentOutput:
-        rag = self._retrieve(digest, state)
         timestamp = str(digest.get("timestamp") or "")
-
-        payload: Dict[str, Any] = {
-            "timestamp": timestamp,
-            "horizon": self.spec.default_horizon,
-            "news_digest": digest.get("news_digest", []),
-            "state": state,
-            "preferred_tickers": self.spec.preferred_tickers,
-            "trading_rules": {
-                "cash_available_usd": (state or {}).get("cash_usd", 0.0),
-                "max_order_pct_equity": self.max_order_pct_equity,
-                "shorting_allowed": False,
-                "whole_shares_only": True,
-            },
-            "rag_context": rag["context"],
-            "rag_meta": rag["meta"],
+        trading_rules = {
+            "cash_available_usd": (state or {}).get("cash_usd", 0.0),
+            "max_order_pct_equity": self.max_order_pct_equity,
+            "shorting_allowed": False,
+            "whole_shares_only": True,
         }
+
+        if brief is not None:
+            # The Town Crier already retrieved and summarized for the whole desk.
+            payload: Dict[str, Any] = {
+                "timestamp": timestamp,
+                "horizon": self.spec.default_horizon,
+                "brief": {**brief,
+                          "order_instructions": {**trading_rules,
+                                                 **(brief.get("order_instructions") or {})}},
+                "state": state,
+                "preferred_tickers": self.spec.preferred_tickers,
+            }
+            rag = {"meta": {"status": "from_brief",
+                            "docs": len((brief.get("historical_context") or {}).get("documents", [])),
+                            "query": (brief.get("historical_context") or {}).get("questions_asked", [])},
+                   "context": (brief.get("historical_context") or {}).get("documents", [])}
+        else:
+            rag = self._retrieve(digest, state)
+            payload = {
+                "timestamp": timestamp,
+                "horizon": self.spec.default_horizon,
+                "news_digest": digest.get("news_digest", []),
+                "state": state,
+                "preferred_tickers": self.spec.preferred_tickers,
+                "trading_rules": trading_rules,
+                "rag_context": rag["context"],
+                "rag_meta": rag["meta"],
+            }
 
         revision = bool(peer_context)
         if revision:
@@ -222,6 +264,7 @@ class LLMPersonaAgent(BaseAgent):
                     "forecasts": prior_output.get("forecasts"),
                 }
 
+        self.uses_brief = brief is not None
         messages = [
             {"role": "system", "content": SHARED_SYSTEM},
             {"role": "developer", "content": self._developer_prompt(revision)},
@@ -244,6 +287,7 @@ class LLMPersonaAgent(BaseAgent):
             **out.get("checks", {}),
             "rag_status": rag["meta"].get("status"),
             "rag_docs": len(rag["context"]),
+            "brief": brief is not None,
             "round": 2 if revision else 1,
         }
         return out

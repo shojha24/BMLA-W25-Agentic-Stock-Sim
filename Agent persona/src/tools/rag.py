@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from tools.headline_store import DEFAULT_DB_NAME, HeadlineStore
+from tools.news_index import LiveNewsIndex
 
 DECAY_RATE = 0.995          # a story keeps ~16% of its weight after a year
 RRF_K = 60                  # reciprocal-rank-fusion constant
@@ -50,6 +51,7 @@ class RAGNewsTool:
         decay_rate: float = DECAY_RATE,
         use_dense: bool = True,
         top_k_fallback: int = 8,
+        live_index: Optional[LiveNewsIndex] = None,
     ):
         root = Path(__file__).resolve().parents[3]
         self.bm25_index_path = Path(bm25_index_path or root / "dataset" / "news_bm25_index")
@@ -59,6 +61,8 @@ class RAGNewsTool:
         self.decay_rate = decay_rate
         self.use_dense = use_dense
         self.top_k_fallback = top_k_fallback
+        # News from the current run: the archive stops in 2020, this does not.
+        self.live_index = live_index
 
         self._loaded = False
         self._available = False
@@ -216,6 +220,17 @@ class RAGNewsTool:
                 break
         return rows
 
+    def _live_search(self, query: str, limit: int, cutoff_date: Optional[str],
+                     stock_set: Optional[set]) -> List[Dict[str, Any]]:
+        if self.live_index is None:
+            return []
+        try:
+            return self.live_index.search(query, top_k=limit, cutoff_date=cutoff_date,
+                                          tickers=stock_set)
+        except Exception as exc:
+            self._notes.append(f"live index search failed ({exc})")
+            return []
+
     def _decay(self, score: float, doc_date: str, cutoff_date: Optional[str]) -> float:
         if not doc_date:
             return score
@@ -229,9 +244,9 @@ class RAGNewsTool:
 
     def _hydrate(self, rows: List[Dict[str, Any]]) -> str:
         """Attach headline text. Returns which source supplied it."""
-        doc_ids = [r["doc_id"] for r in rows]
+        doc_ids = [r["doc_id"] for r in rows if not r.get("text")]
         if not doc_ids:
-            return "none"
+            return "live_index" if rows else "none"
 
         texts: Dict[str, str] = {}
         source = "none"
@@ -252,6 +267,8 @@ class RAGNewsTool:
             source = "chromadb+sqlite" if source == "chromadb" else "sqlite"
 
         for row in rows:
+            if row.get("text"):
+                continue                        # live-index rows arrive with their text
             row["text"] = (texts.get(row["doc_id"], "") or "")[:400]
         return source
 
@@ -283,9 +300,10 @@ class RAGNewsTool:
         except Exception as exc:
             return [], f"BM25 retrieval failed: {exc}"
         dense = self._dense_search(query, limit, cutoff_date, stock_list or None)
+        live = self._live_search(query, limit, cutoff_date, stock_set)
 
         stock_filtered = bool(stock_set)
-        if not lexical and not dense and stock_set:
+        if not lexical and not dense and not live and stock_set:
             # Macro themes are rarely tagged with the exact ETF we hold, so an
             # empty ticker-filtered result means "widen", not "no evidence".
             stock_filtered = False
@@ -294,14 +312,15 @@ class RAGNewsTool:
             except Exception as exc:
                 return [], f"BM25 retrieval failed: {exc}"
             dense = self._dense_search(query, limit, cutoff_date, None)
+            live = self._live_search(query, limit, cutoff_date, None)
 
-        if not lexical and not dense:
+        if not lexical and not dense and not live:
             return [], ""  # nothing matched the filters; not an error
 
         meta: Dict[str, Dict[str, Any]] = {}
         recency: Dict[str, float] = {}
         relevance: Dict[str, float] = {}
-        for ranked in (lexical, dense):
+        for ranked in (lexical, dense, live):
             for rank, row in enumerate(ranked):
                 doc_id = row["doc_id"]
                 meta.setdefault(doc_id, row)
@@ -361,6 +380,7 @@ class RAGNewsTool:
             "error": self._error,
             "notes": list(self._notes),
             "dense_enabled": self.dense_enabled,
+            "live_index_rows": self.live_index.count() if self.live_index is not None else 0,
             "headline_store": str(self.headline_db_path) if self._store.available else None,
             "headline_rows": self._store.count() if self._store.available else 0,
             "bm25_index_path": str(self.bm25_index_path),

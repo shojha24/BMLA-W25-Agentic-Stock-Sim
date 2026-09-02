@@ -106,13 +106,17 @@ portfolio. See `SIMULATION.md` for feeds, benchmarks, metrics, ablations and the
 ```
 src/
   simulate.py              backtest / live / ablate
+  agents/  town_crier.py   summarizes the segment, writes the retrieval questions
   data/    news_feed.py market_data.py digest_builder.py
-  sim/     portfolio.py execution.py engine.py actions_db.py assets_db.py
+  sim/     brief.py portfolio.py execution.py engine.py actions_db.py assets_db.py
+  tools/   rag.py news_index.py headline_store.py
   eval/    metrics.py benchmarks.py
 ```
 
-Agents place real orders (`actions`) against their own books, filled by a market simulator
-that enforces cash, holdings, position caps and cooldowns. See `SIMULATION.md`.
+Each cycle the Town Crier summarizes the news and writes the retrieval questions; retrieval
+runs once for the desk; each agent reads a 15-Minute Brief carrying its own balance, its own
+last trades (rejections included), what its peers did, and the historical context; then places
+real orders against its own book through a market simulator. See `SIMULATION.md`.
 
 ## Not built yet
 

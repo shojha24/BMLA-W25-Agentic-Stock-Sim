@@ -62,6 +62,7 @@ class SentimentBaselineAgent(BaseAgent):
         state: State,
         peer_context: Optional[List[Dict[str, Any]]] = None,
         prior_output: Optional[AgentOutput] = None,
+        brief: Optional[Dict[str, Any]] = None,
     ) -> AgentOutput:
         items = digest.get("news_digest", []) or []
         prices = state.get("prices", {}) or {}

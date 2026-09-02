@@ -20,11 +20,14 @@ from core.io import append_jsonl, save_json
 from data.market_data import PriceStore, horizon_to_sessions
 from eval.benchmarks import NaiveForecaster
 from eval.metrics import score_forecasts, summarize_equity, summarize_forecasts
+from agents.town_crier import SegmentBrief, TownCrierAgent
 from orchestration.roundtable import Roundtable
 from sim.actions_db import ActionsDB
 from sim.assets_db import AssetsDB
+from sim.brief import BriefAssembler, BriefConfig
 from sim.execution import ExecutionConfig, ExecutionVenue, MarketFillVenue, summarize_fills
 from sim.portfolio import Portfolio, target_weights
+from tools.news_index import LiveNewsIndex
 
 INDEX_TICKER = "SPY"
 
@@ -49,6 +52,11 @@ class EngineConfig:
     # Each agent trades its own book with this much cash (the private Agent Assets DB).
     agent_cash: float = 100_000.0
     trade_agent_books: bool = True
+    # Phase 2: Town Crier summarises the segment, retrieval runs once centrally,
+    # and each agent reads a 15-Minute Brief instead of a raw digest.
+    use_briefs: bool = True
+    index_live_news: bool = True
+    context_top_k: int = 8
 
 
 class SimulationEngine:
@@ -64,6 +72,9 @@ class SimulationEngine:
         run_id: str = "",
         venue: Optional[ExecutionVenue] = None,
         execution_config: Optional[ExecutionConfig] = None,
+        town_crier: Optional[TownCrierAgent] = None,
+        rag_tool: Optional[Any] = None,
+        brief_config: Optional[BriefConfig] = None,
     ):
         self.panel = panel
         self.feed = feed
@@ -101,6 +112,18 @@ class SimulationEngine:
         self.agent_curves: Dict[str, List[float]] = {name: [] for name in self.agent_names}
         self.actions_db = ActionsDB(self.log_dir / "actions.sqlite")       # public
         self.assets_db = AssetsDB(self.log_dir / "agent_assets.sqlite")    # private
+
+        # --- Phase 2: Town Crier, central retrieval, briefs, live news index ---
+        self.town_crier = town_crier or TownCrierAgent(digest_builder, use_llm=False)
+        self.rag_tool = rag_tool
+        self.brief_assembler = BriefAssembler(self.actions_db, self.assets_db, brief_config)
+        self.live_index: Optional[LiveNewsIndex] = None
+        if config.index_live_news:
+            self.live_index = getattr(rag_tool, "live_index", None) or \
+                LiveNewsIndex(self.log_dir / "live_news.sqlite")
+            if rag_tool is not None and getattr(rag_tool, "live_index", None) is None:
+                rag_tool.live_index = self.live_index      # retrieval sees this run's news
+        self.segments: List[Dict[str, Any]] = []
         self.fills: List[Dict[str, Any]] = []
         self.cycle_index = 0
 
@@ -141,14 +164,44 @@ class SimulationEngine:
 
         self.cycle_index += 1
         timestamp = at.strftime("%Y-%m-%dT%H:%M:%SZ")
-        digest = self.digest_builder.build(news, timestamp, cfg.universe)
+
+        segment = self.town_crier.summarize_segment(news, timestamp, cfg.universe)
+        digest = segment.digest
         state = self.portfolios["agents_consensus"].to_state(universe_prices)
         # Each agent sees its own balance sheet: this is the private Agent Assets read.
         state_by_agent = {name: book.to_state(universe_prices)
                           for name, book in self.agent_books.items()}
 
+        brief_by_agent: Optional[Dict[str, Dict[str, Any]]] = None
+        context = {"summary": "", "documents": [], "questions": []}
+        if cfg.use_briefs:
+            # "Historical Context" means news from before this segment: exclude the
+            # items the agents are already reading in the digest.
+            context = self._retrieve_context(
+                segment, day,
+                exclude_ids={str(getattr(n, "news_id", "")) for n in news})
+            brief_by_agent = {
+                name: self.brief_assembler.build(
+                    name, segment, state_by_agent[name],
+                    run_id=self.run_id, cycle=self.cycle_index,
+                    historical_context=context["summary"],
+                    historical_docs=context["documents"],
+                    reflections=[],                     # Phase 3 fills this
+                    order_instructions={
+                        "max_order_pct_equity": self.exec_config.max_order_pct_equity,
+                        "shorting_allowed": self.exec_config.allow_short,
+                        "whole_shares_only": self.exec_config.whole_shares,
+                        "cooldown_cycles": self.exec_config.cooldown_cycles,
+                        "cost_bps": self.exec_config.cost_bps,
+                        "slippage_bps": self.exec_config.slippage_bps,
+                    },
+                )
+                for name in self.agent_books
+            }
+
         try:
-            table = self.panel.run(digest, state, state_by_agent=state_by_agent)
+            table = self.panel.run(digest, state, state_by_agent=state_by_agent,
+                                   brief_by_agent=brief_by_agent)
         except Exception as exc:
             self.skipped.append({"day": day, "reason": f"panel failed: {type(exc).__name__}: {exc}"})
             return None
@@ -205,6 +258,8 @@ class SimulationEngine:
             self.fills.extend(cycle_fills)
             execution = summarize_fills(cycle_fills)
 
+        indexed = self._index_segment(news)
+
         if table.get("revision"):
             self.revisions.append(table["revision"])
 
@@ -213,6 +268,9 @@ class SimulationEngine:
             "timestamp": timestamp,
             "day": day,
             "n_news": len(news),
+            "segment": segment.to_dict(),
+            "historical_context": context,
+            "news_indexed": indexed,
             "digest": digest,
             "prices": prices_now,
             "consensus": table["consensus"],
@@ -231,7 +289,39 @@ class SimulationEngine:
         append_jsonl(self.log_path, record)
         self.cycles.append({"day": day, "n_news": len(news),
                             "consensus": table["consensus"], "cycle_scores": cycle_scores})
+        self.segments.append({"day": day, "source": segment.source, "n_items": segment.n_items,
+                              "context_docs": len(context["documents"])})
         return record
+
+    def _retrieve_context(self, segment: SegmentBrief, day: str,
+                          exclude_ids: Optional[set] = None) -> Dict[str, Any]:
+        """Doc Retrieval, run once for the desk on the Town Crier's questions."""
+        questions = [q for q in segment.rag_questions.get("news", []) if q.strip()]
+        if self.rag_tool is None or not questions:
+            return {"summary": "", "documents": [], "questions": questions}
+
+        seen, docs = set(exclude_ids or ()), []
+        per_question = max(2, self.config.context_top_k // max(len(questions), 1))
+        for question in questions[:4]:
+            rows, _ = self.rag_tool.retrieve(
+                query=question, top_k=per_question,
+                stock_filter=list(self.config.universe), cutoff_date=day)
+            for row in rows:
+                if row["doc_id"] in seen:
+                    continue
+                seen.add(row["doc_id"])
+                docs.append(row)
+            if len(docs) >= self.config.context_top_k:
+                break
+
+        docs = docs[: self.config.context_top_k]
+        summary = self.town_crier.summarize_context(docs, "; ".join(questions[:2]))
+        return {"summary": summary, "documents": docs, "questions": questions}
+
+    def _index_segment(self, news: Sequence[Any]) -> int:
+        """Index after the cycle has read its context, so this segment is 'old news'
+        from the next cycle onward and never retrieves itself."""
+        return self.live_index.add(news) if self.live_index is not None else 0
 
     # ---------------- drivers ----------------
 
@@ -337,6 +427,15 @@ class SimulationEngine:
             },
             "feed": self.feed.describe() if hasattr(self.feed, "describe") else {},
             "digest_builder": getattr(self.digest_builder, "name", "unknown"),
+            "briefing": {
+                "enabled": self.config.use_briefs,
+                "town_crier": "llm" if self.town_crier.use_llm else "heuristic",
+                "segments": len(self.segments),
+                "mean_context_docs": round(
+                    sum(s["context_docs"] for s in self.segments) / len(self.segments), 2)
+                if self.segments else 0.0,
+                "live_index_rows": self.live_index.count() if self.live_index is not None else 0,
+            },
             "agents": self.panel.agents_names if hasattr(self.panel, "agents_names") else [a.name for a in self.panel.agents],
             "forecast_metrics": forecast_stats,
             "portfolio_metrics": equity_stats,

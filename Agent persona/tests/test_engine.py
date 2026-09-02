@@ -85,9 +85,9 @@ def test_agents_receive_their_own_balance_sheet(prices, feed, tmp_path):
 
     original = engine.panel.run
 
-    def spy(digest, state, state_by_agent=None):
+    def spy(digest, state, state_by_agent=None, **kwargs):
         seen.update(state_by_agent or {})
-        return original(digest, state, state_by_agent=state_by_agent)
+        return original(digest, state, state_by_agent=state_by_agent, **kwargs)
 
     engine.panel.run = spy
     engine.run_backtest("2016-01-04", "2016-01-12")
@@ -199,3 +199,62 @@ def test_cli_execution_flags_reach_the_venue():
     assert (cfg.cooldown_cycles, cfg.slippage_bps, cfg.max_order_pct_equity) == (3, 7.0, 0.2)
     assert cfg.allow_short is False
     assert all(book.cash == 50000.0 for book in engine.agent_books.values())
+
+
+def test_agents_are_handed_a_brief_not_a_raw_digest(prices, feed, tmp_path):
+    engine = make_engine(prices, feed, tmp_path)
+    seen = {}
+    original = engine.panel.run
+
+    def spy(digest, state, state_by_agent=None, brief_by_agent=None, **kw):
+        seen.update(brief_by_agent or {})
+        return original(digest, state, state_by_agent=state_by_agent,
+                        brief_by_agent=brief_by_agent, **kw)
+
+    engine.panel.run = spy
+    engine.run_backtest("2016-01-04", "2016-01-19")
+
+    assert set(seen) == set(engine.agent_books)
+    brief = seen["macro_econ_llm_v2"]
+    assert brief["news_summary"]
+    assert brief["your_balance"]["cash_usd"] > 0
+    assert "your_reflections" in brief
+    assert brief["order_instructions"]["max_order_pct_equity"] > 0
+
+
+def test_briefs_can_be_disabled_for_ablation(prices, feed, tmp_path):
+    engine = make_engine(prices, feed, tmp_path)
+    engine.config.use_briefs = False
+    seen = {"brief": "unset"}
+    original = engine.panel.run
+
+    def spy(digest, state, state_by_agent=None, brief_by_agent=None, **kw):
+        seen["brief"] = brief_by_agent
+        return original(digest, state, state_by_agent=state_by_agent,
+                        brief_by_agent=brief_by_agent, **kw)
+
+    engine.panel.run = spy
+    report = engine.run_backtest("2016-01-04", "2016-01-19")
+    assert seen["brief"] is None
+    assert report["briefing"]["enabled"] is False
+
+
+def test_this_runs_news_is_indexed_for_later_retrieval(prices, feed, tmp_path):
+    engine = make_engine(prices, feed, tmp_path)
+    report = engine.run_backtest("2016-01-04", "2016-01-19")
+    assert engine.live_index is not None
+    assert report["briefing"]["live_index_rows"] > 0
+
+
+def test_historical_context_never_returns_the_current_segment(prices, feed, tmp_path):
+    """Indexing happens after retrieval, so a cycle cannot cite itself as history."""
+    import json as _json
+    engine = make_engine(prices, feed, tmp_path)
+    engine.rag_tool = type("R", (), {"retrieve": staticmethod(
+        lambda **kw: ([{"doc_id": "n1", "date": "2016-01-01", "text": "old", "stocks": []}], ""))})()
+    report = engine.run_backtest("2016-01-04", "2016-01-19")
+    for line in Path(report["log_path"]).read_text().splitlines():
+        record = _json.loads(line)
+        segment_ids = {i["news_id"] for i in record["digest"]["news_digest"]}
+        context_ids = {d["doc_id"] for d in record["historical_context"]["documents"]}
+        assert not (segment_ids & context_ids)

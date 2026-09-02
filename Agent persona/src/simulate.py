@@ -22,6 +22,7 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from agents.baseline import SentimentBaselineAgent          # noqa: E402
+from agents.town_crier import TownCrierAgent                # noqa: E402
 from agents.persona import LLMPersonaAgent                  # noqa: E402
 from agents.personas import DEFAULT_PANEL, PERSONAS         # noqa: E402
 from core.io import load_env, save_json                     # noqa: E402
@@ -83,8 +84,19 @@ def make_engine(args, universe, panel=None, rag_tool=None, run_id="", benchmarks
         universe=list(universe), horizon=args.horizon, initial_cash=args.cash,
         cost_bps=args.cost_bps, max_gross=args.max_gross, allow_short=not args.long_only,
         lookback_hours=args.lookback_hours, agent_cash=args.agent_cash,
-        trade_agent_books=not args.no_agent_books,
+        trade_agent_books=not args.no_agent_books, use_briefs=not args.no_briefs,
+        index_live_news=not args.no_live_index, context_top_k=args.context_top_k,
     )
+
+    # The Town Crier writes the segment summary and the retrieval questions. It uses
+    # the LLM whenever the panel does, unless told otherwise.
+    crier_mode = args.town_crier
+    if crier_mode == "auto":
+        crier_mode = "llm" if args.mode == "llm" else "heuristic"
+    crier_client = make_client(args.mode, args.horizon) if crier_mode == "llm" else None
+    town_crier = TownCrierAgent(builder, client=crier_client, model=args.model,
+                                use_llm=crier_mode == "llm",
+                                max_context_docs=args.context_top_k)
     execution_config = ExecutionConfig(
         cost_bps=args.cost_bps, slippage_bps=args.slippage_bps,
         allow_short=args.agents_may_short,      # off by default: buy/sell of held shares only
@@ -96,7 +108,8 @@ def make_engine(args, universe, panel=None, rag_tool=None, run_id="", benchmarks
                             benchmarks=benchmarks if benchmarks is not None else build_benchmarks(names),
                             run_id=run_id,
                             venue=MarketFillVenue(execution_config),
-                            execution_config=execution_config)
+                            execution_config=execution_config,
+                            town_crier=town_crier, rag_tool=rag_tool)
 
 
 def print_report(report: dict) -> None:
@@ -122,6 +135,12 @@ def print_report(report: dict) -> None:
             ann_txt = f"{ann * 100:8.2f}%" if ann is not None else f"{'-':>9}"
             print(f"{row['model']:28} {row['cumulative_return'] * 100:8.2f}% {ann_txt} "
                   f"{(row.get('sharpe') or 0):8.2f} {(row.get('max_drawdown') or 0) * 100:7.1f}%")
+
+    br = report.get("briefing", {})
+    if br:
+        print(f"\nbriefing: {'on' if br.get('enabled') else 'off'} | town crier {br.get('town_crier')} "
+              f"| {br.get('mean_context_docs')} context docs/cycle "
+              f"| live index {br.get('live_index_rows')} rows")
 
     ex = report.get("execution", {})
     if ex.get("totals", {}).get("n_orders"):
@@ -269,6 +288,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="skip order execution; score forecasts only")
         sp.add_argument("--agents-may-short", action="store_true",
                         help="let agents sell shares they do not hold (off: buy/sell only)")
+        sp.add_argument("--town-crier", choices=["auto", "llm", "heuristic"], default="auto",
+                        help="who writes the segment summary and the retrieval questions")
+        sp.add_argument("--no-briefs", action="store_true",
+                        help="ablation: hand agents the raw digest and let each retrieve for itself")
+        sp.add_argument("--no-live-index", action="store_true",
+                        help="do not index this run's news for later retrieval")
+        sp.add_argument("--context-top-k", type=int, default=8,
+                        help="documents retrieved for the brief's historical context")
         sp.add_argument("--quiet", action="store_true")
 
     bt = sub.add_parser("backtest", help="replay historical sessions")
