@@ -210,3 +210,8 @@ dataset/analyst_ratings_processed.csv
 dataset/analyst_ratings_consolidated.csv
 
 dataset/vector_store/
+# Project artifacts
+dataset/headline_store.sqlite
+dataset/vector_store/
+Agent persona/data/runs/
+.venv/

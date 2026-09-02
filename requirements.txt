@@ -1,0 +1,13 @@
+# Core: everything needed to run the agent panel and BM25 retrieval offline.
+requests>=2.31
+python-dotenv>=1.0
+numpy>=1.26
+bm25s>=0.3
+PyStemmer>=2.2
+pytest>=8.0
+
+# Optional: dense half of the hybrid retriever.
+# Needs dataset/vector_store (distributed out-of-band) and GOOGLE_API_KEY.
+# Without these the retriever runs BM25-only against the local headline store.
+# chromadb>=0.5
+# google-genai>=1.0

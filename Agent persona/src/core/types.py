@@ -1,6 +1,8 @@
 from __future__ import annotations
-from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, TypedDict
+
+Direction = Literal["UP", "DOWN", "FLAT"]
+RiskRegime = Literal["RISK_ON", "RISK_OFF", "NEUTRAL"]
 
 
 class DigestItem(TypedDict):
@@ -31,6 +33,21 @@ class State(TypedDict):
     prices: Dict[str, float]
 
 
+class Forecast(TypedDict):
+    """The scorable unit of the simulation.
+
+    Every agent must emit these; the consensus aggregates them and the
+    evaluator scores them against realized returns.
+    """
+    ticker: str
+    direction: Direction
+    expected_return_bps: float    # signed, basis points over `horizon`
+    horizon: str                  # "15m" | "1d" | "5d"
+    confidence: float             # 0..1
+    rationale: str
+    news_refs: List[str]          # news_id / doc_id references
+
+
 class AgentOutput(TypedDict):
     agent_name: str
     persona: str
@@ -38,5 +55,28 @@ class AgentOutput(TypedDict):
     decision: str
     market_view: Dict[str, Any]
     signals: List[Dict[str, Any]]
+    forecasts: List[Forecast]
     trade_ideas: List[Dict[str, Any]]
     checks: Dict[str, Any]
+
+
+class ConsensusForecast(TypedDict):
+    ticker: str
+    direction: Direction
+    expected_return_bps: float
+    horizon: str
+    confidence: float             # 0..1, already discounted by disagreement
+    agreement: float              # 0..1, weighted share of the modal direction
+    net_vote: float               # -1..1, weighted directional vote (UP=+1, DOWN=-1)
+    dispersion_bps: float         # stdev of member expected_return_bps
+    n_agents: int
+    votes: List[Dict[str, Any]]   # per-agent direction/bps/confidence
+
+
+class ConsensusResult(TypedDict):
+    timestamp: str
+    horizon: str
+    risk_regime: RiskRegime
+    forecasts: List[ConsensusForecast]
+    mean_agreement: float
+    agents: List[str]

@@ -1,16 +1,60 @@
 {
-    "timestamp": "2026-01-17T19:53:00Z",
-    "news_digest": [
-      {
-        "news_id": "news_1",
-        "time": "2026-01-17T19:45:00Z",
-        "source": "MockWire",
-        "headline": "CPI hotter-than-expected; yields jump",
-        "summary": "Inflation surprised to the upside and Treasury yields moved higher, pressuring risk assets.",
-        "tickers_mentioned": ["SPY", "QQQ", "TLT"],
-        "macro_tags": ["CPI", "YIELDS", "RISK_OFF"],
-        "sentiment": "BEARISH",
-        "confidence": 0.8
-      }
-    ]
-  }
+  "timestamp": "2026-01-17T19:53:00Z",
+  "news_digest": [
+    {
+      "news_id": "news_1",
+      "time": "2026-01-17T19:45:00Z",
+      "source": "MockWire",
+      "headline": "CPI hotter-than-expected; yields jump",
+      "summary": "Inflation surprised to the upside and Treasury yields moved higher, pressuring risk assets.",
+      "tickers_mentioned": ["SPY", "QQQ", "TLT"],
+      "macro_tags": ["CPI", "YIELDS", "RISK_OFF"],
+      "sentiment": "BEARISH",
+      "confidence": 0.8
+    },
+    {
+      "news_id": "news_2",
+      "time": "2026-01-17T19:47:00Z",
+      "source": "MockWire",
+      "headline": "Fed speakers push back on near-term cuts",
+      "summary": "Two regional Fed presidents said policy needs to stay restrictive until inflation is durably lower.",
+      "tickers_mentioned": ["TLT", "UUP"],
+      "macro_tags": ["FED", "RATES", "POLICY"],
+      "sentiment": "BEARISH",
+      "confidence": 0.65
+    },
+    {
+      "news_id": "news_3",
+      "time": "2026-01-17T19:49:00Z",
+      "source": "MockWire",
+      "headline": "Megacap tech earnings beat on AI capex guidance",
+      "summary": "Two megacap names raised data-center capex guidance and beat on margins after the close.",
+      "tickers_mentioned": ["QQQ", "SPY"],
+      "macro_tags": ["EARNINGS", "TECH", "RISK_ON"],
+      "sentiment": "BULLISH",
+      "confidence": 0.72
+    },
+    {
+      "news_id": "news_4",
+      "time": "2026-01-17T19:51:00Z",
+      "source": "MockWire",
+      "headline": "Crude slides as OPEC+ signals higher output quotas",
+      "summary": "Brent fell over 3% on reports the cartel will raise quotas at its next meeting.",
+      "tickers_mentioned": ["XLE"],
+      "macro_tags": ["OIL", "COMMODITIES", "SUPPLY"],
+      "sentiment": "BEARISH",
+      "confidence": 0.7
+    },
+    {
+      "news_id": "news_5",
+      "time": "2026-01-17T19:52:00Z",
+      "source": "MockWire",
+      "headline": "Dollar firms; gold holds gains despite higher real rates",
+      "summary": "The dollar index rose with front-end yields while gold was resilient on continued central-bank buying.",
+      "tickers_mentioned": ["UUP", "GLD"],
+      "macro_tags": ["FX", "GOLD", "REAL_RATES"],
+      "sentiment": "NEUTRAL",
+      "confidence": 0.55
+    }
+  ]
+}
