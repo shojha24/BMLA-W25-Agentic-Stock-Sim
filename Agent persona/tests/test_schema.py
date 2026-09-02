@@ -2,7 +2,7 @@ import pytest
 
 from core.schema import (
     SchemaError, extract_json, normalize_agent_output, normalize_confidence,
-    normalize_forecasts,
+    normalize_forecasts, normalize_orders,
 )
 
 
@@ -65,3 +65,46 @@ def test_agent_output_fills_required_keys():
                 "forecasts", "trade_ideas", "checks"):
         assert key in out
     assert out["market_view"]["risk_regime"] == "NEUTRAL"
+
+
+def test_orders_accept_the_whiteboard_positional_form():
+    (order,) = normalize_orders([["Buy", 10, "AAPL"]], universe=["AAPL"])
+    assert order["side"] == "BUY" and order["qty"] == 10 and order["ticker"] == "AAPL"
+
+
+def test_orders_accept_the_dict_form_with_aliases():
+    (order,) = normalize_orders([{"action": "sell", "shares": "5", "stock": "qqq"}],
+                                universe=["QQQ"])
+    assert order["side"] == "SELL" and order["qty"] == 5.0
+
+
+def test_hold_is_not_an_order():
+    assert normalize_orders([{"side": "HOLD", "ticker": "QQQ", "qty": 5}], universe=["QQQ"]) == []
+
+
+def test_orders_for_unknown_tickers_are_dropped():
+    assert normalize_orders([{"side": "BUY", "ticker": "MOON", "qty": 5}], universe=["QQQ"]) == []
+
+
+def test_non_positive_quantities_are_dropped():
+    assert normalize_orders([{"side": "BUY", "ticker": "QQQ", "qty": 0}], universe=["QQQ"]) == []
+    assert normalize_orders([{"side": "BUY", "ticker": "QQQ", "qty": -5}],
+                            universe=["QQQ"])[0]["qty"] == 5.0     # sign lives in `side`
+
+
+def test_duplicate_orders_on_the_same_side_are_merged():
+    orders = normalize_orders([{"side": "BUY", "ticker": "QQQ", "qty": 5},
+                               {"side": "BUY", "ticker": "QQQ", "qty": 3}], universe=["QQQ"])
+    assert len(orders) == 1 and orders[0]["qty"] == 8
+
+
+def test_a_limit_order_without_a_price_becomes_a_market_order():
+    (order,) = normalize_orders([{"side": "BUY", "ticker": "QQQ", "qty": 5,
+                                  "order_type": "LIMIT"}], universe=["QQQ"])
+    assert order["order_type"] == "MARKET" and order["limit_price"] is None
+
+
+def test_agent_output_carries_orders_from_either_key():
+    out = normalize_agent_output({"actions": [{"side": "BUY", "ticker": "SPY", "qty": 2}]},
+                                 agent_name="a", persona="p", timestamp="t", universe=["SPY"])
+    assert out["orders"][0]["ticker"] == "SPY"

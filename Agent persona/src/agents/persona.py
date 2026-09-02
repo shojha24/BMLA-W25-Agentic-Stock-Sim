@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from agents.base import BaseAgent
 from core.schema import extract_json, normalize_agent_output
-from core.types import AgentOutput, Digest, Forecast, State
+from core.types import AgentOutput, Digest, State
 from llm.base import ChatClient
 from tools.rag import RAGNewsTool
 
@@ -32,16 +32,32 @@ Output a SINGLE JSON object with exactly these keys:
 - "forecasts": one object per ticker you have a view on, each
   {"ticker", "direction": "UP"|"DOWN"|"FLAT", "expected_return_bps": signed number,
    "horizon": "{horizon}", "confidence": 0..1, "rationale": string, "news_refs": [news_id|doc_id, ...]}
-- "trade_ideas": <= 6 objects {"ticker", "bias": "OVERWEIGHT"|"UNDERWEIGHT"|"NEUTRAL",
-  "rationale", "news_refs", "suggested_position_pct_equity"}
+- "actions": the orders you are placing this cycle, each
+  {"side": "BUY"|"SELL", "ticker", "qty": whole number of shares, "rationale",
+   "news_refs": [...]}. Use [] to trade nothing.
 - "checks": {"digest_items": int, "universe_prices_keys": int}
 
-Hard constraints:
-- "forecasts" is the scored output of this system. Emit at least one, and only for
-  tickers present in state.prices. Never invent a ticker.
+"forecasts" and "actions" are two different jobs. Do not let caution about one
+suppress the other.
+
+Hard constraints on "forecasts" (your view, scored every cycle):
+- Emit one forecast for EVERY ticker in state.prices. Never invent a ticker.
+- FLAT is a claim that the move will be smaller than +/-10 bps, not a way to say
+  "I am unsure". Uncertainty belongs in "confidence". A thin digest means low
+  confidence with a direction, not a wall of FLAT.
 - expected_return_bps is the signed move over {horizon} in basis points (100 bps = 1%).
-  Its sign must agree with "direction"; use FLAT with |bps| <= 10 when you have no edge.
+  Its sign must agree with "direction".
 - confidence is calibrated: reserve > 0.8 for news that is unambiguous for that ticker.
+
+Hard constraints on "actions" (real orders against your own book):
+- You may only BUY with the cash in state.cash_usd, at the prices in state.prices.
+  An order you cannot pay for is cut down or rejected by the venue.
+- You may only SELL shares you actually hold in state.positions. No shorting.
+- qty is a whole number of shares. No single order may exceed {max_order_pct}% of your equity.
+- Trade when your own forecast is directional and you have the conviction for it;
+  an empty list is acceptable when nothing clears your bar, but standing aside every
+  cycle means the book never expresses your views.
+- Actions must agree with your forecasts: never buy what you forecast DOWN.
 - rag_context is historical background retrieved from a 2009-2020 news archive.
   It is supporting evidence only; the current digest dominates.
 Output JSON ONLY.
@@ -57,6 +73,8 @@ other agents' forecasts and reasoning.
   their reasoning changed yours.
 - Add a "revision_note" string to market_view saying what you changed and why
   (or that you held).
+- Your "actions" are re-submitted from scratch each round: round 1's orders were not
+  sent to the venue. Emit the orders you actually want executed now.
 Emit the same JSON schema as round 1.
 """
 
@@ -82,8 +100,10 @@ class LLMPersonaAgent(BaseAgent):
         model: str = "minimax/minimax-m3:free",
         rag_tool: Optional[RAGNewsTool] = None,
         use_rag: bool = True,
+        max_order_pct_equity: float = 0.35,
     ):
         self.spec = spec
+        self.max_order_pct_equity = max_order_pct_equity
         self.name = spec.name
         self.persona = spec.persona
         self.client = client
@@ -136,10 +156,13 @@ class LLMPersonaAgent(BaseAgent):
     # ---------------- prompting ----------------
 
     def _developer_prompt(self, revision: bool) -> str:
+        contract = (OUTPUT_CONTRACT
+                    .replace("{horizon}", self.spec.default_horizon)
+                    .replace("{max_order_pct}", str(int(self.max_order_pct_equity * 100))))
         blocks = [
             f"Persona: {self.spec.persona}",
             self.spec.mandate.strip(),
-            OUTPUT_CONTRACT.replace("{horizon}", self.spec.default_horizon),
+            contract,
         ]
         if revision:
             blocks.append(REVISION_BLOCK)
@@ -178,6 +201,12 @@ class LLMPersonaAgent(BaseAgent):
             "news_digest": digest.get("news_digest", []),
             "state": state,
             "preferred_tickers": self.spec.preferred_tickers,
+            "trading_rules": {
+                "cash_available_usd": (state or {}).get("cash_usd", 0.0),
+                "max_order_pct_equity": self.max_order_pct_equity,
+                "shorting_allowed": False,
+                "whole_shares_only": True,
+            },
             "rag_context": rag["context"],
             "rag_meta": rag["meta"],
         }

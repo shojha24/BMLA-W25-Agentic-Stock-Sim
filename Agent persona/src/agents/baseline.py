@@ -9,7 +9,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from agents.base import BaseAgent
-from core.types import AgentOutput, Digest, Forecast, State
+from core.schema import normalize_orders
+from core.types import AgentOutput, Digest, Forecast, Order, State
 from core.utils import estimate_equity
 
 _SENTIMENT_SIGN = {"BULLISH": 1.0, "BEARISH": -1.0, "NEUTRAL": 0.0}
@@ -25,9 +26,35 @@ class SentimentBaselineAgent(BaseAgent):
     name = "sentiment_baseline_v1"
     persona = "Rule-based sentiment baseline (no LLM)"
 
-    def __init__(self, scale_bps: float = 60.0, horizon: str = "1d"):
+    def __init__(self, scale_bps: float = 60.0, horizon: str = "1d",
+                 position_pct: float = 0.2):
         self.scale_bps = scale_bps
         self.horizon = horizon
+        self.position_pct = position_pct
+
+    def _orders(self, forecasts: List[Forecast], state: State) -> List[Order]:
+        """Buy the strongest positive call, exit anything called down."""
+        prices = state.get("prices", {}) or {}
+        positions = state.get("positions", {}) or {}
+        cash = float(state.get("cash_usd", 0.0) or 0.0)
+        orders: List[Dict[str, Any]] = []
+        for f in sorted(forecasts, key=lambda x: -abs(x["expected_return_bps"])):
+            price = float(prices.get(f["ticker"], 0.0) or 0.0)
+            if price <= 0 or f["direction"] == "FLAT" or f["confidence"] < 0.3:
+                continue
+            held = float((positions.get(f["ticker"]) or {}).get("qty", 0.0))
+            if f["direction"] == "UP":
+                qty = int((cash * self.position_pct) // price)
+                if qty > 0:
+                    orders.append({"side": "BUY", "ticker": f["ticker"], "qty": qty,
+                                   "rationale": f["rationale"], "news_refs": f["news_refs"]})
+                    cash -= qty * price
+            elif held > 0:
+                orders.append({"side": "SELL", "ticker": f["ticker"], "qty": int(held),
+                               "rationale": f["rationale"], "news_refs": f["news_refs"]})
+        # Route through the same validator the LLM output uses, so every consumer
+        # of an AgentOutput sees identically shaped Order records.
+        return normalize_orders(orders[:4], universe=list(prices))
 
     def run(
         self,
@@ -63,6 +90,7 @@ class SentimentBaselineAgent(BaseAgent):
                 "news_refs": [str(i.get("news_id", "")) for i in items][:4],
             })
 
+        orders = self._orders(forecasts, state)
         regime = "RISK_ON" if tone > 0.2 else ("RISK_OFF" if tone < -0.2 else "NEUTRAL")
         return {
             "agent_name": self.name,
@@ -85,6 +113,7 @@ class SentimentBaselineAgent(BaseAgent):
                 for i in items[:8]
             ],
             "forecasts": forecasts,
+            "orders": orders,
             "trade_ideas": [],
             "checks": {
                 "equity_estimate_usd": round(estimate_equity(state), 2),

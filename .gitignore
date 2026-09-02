@@ -215,3 +215,4 @@ dataset/headline_store.sqlite
 dataset/vector_store/
 Agent persona/data/runs/
 .venv/
+dataset/prices/

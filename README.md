@@ -18,8 +18,14 @@ cp .env.example .env      # then paste your OpenRouter key into it
 # offline smoke test - no API key, no network
 python "Agent persona/src/main.py" --task roundtable --mode mock --quiet
 
-# the real thing
+# one cycle with the real panel
 python "Agent persona/src/main.py" --task roundtable --mode llm
+
+# replay six months of history and score it against the index and naive models
+python "Agent persona/src/simulate.py" backtest --start 2016-01-04 --end 2016-06-30 --mode mock
+
+# live: poll Yahoo Finance headlines every 15 minutes (no API key needed for news or prices)
+python "Agent persona/src/simulate.py" live --interval 15 --cycles 8 --mode llm
 ```
 
 `.env` must use the `VAR=value` form. A file containing only a bare key is silently
@@ -35,11 +41,18 @@ ignored by python-dotenv, which is why the LLM path used to fail with "API key n
 | Scorable forecast schema (direction, bps, horizon, confidence) | ✅ `core/types.py`, validated in `core/schema.py` |
 | Hybrid RAG (BM25 + optional dense) with point-in-time cutoff, ticker filter, recency decay | ✅ `tools/rag.py` |
 | Offline mode (no API key) for tests and CI | ✅ `--mode mock` |
-| Live news ingestion every 15 minutes | ❌ digest is still a fixture (`Agent persona/data/digest.json`) |
-| Market data, portfolio simulation, scheduler | ❌ not built |
-| Benchmarks vs index / naive models, scoring | ❌ not built |
+| Live news ingestion on a 15-minute loop | ✅ `data/news_feed.py` - Yahoo RSS (no key) or Finnhub |
+| Historical replay of 876k archived headlines | ✅ `ArchiveNewsFeed` - what makes backtesting possible |
+| Daily prices, portfolio simulation with costs and shorts | ✅ `data/market_data.py`, `sim/portfolio.py` |
+| Agents place real orders into a market simulator, one book each | ✅ `sim/execution.py`, per-agent `Portfolio` |
+| Public All-Agent-Actions DB + private Agent-Assets DB | ✅ `sim/actions_db.py`, `sim/assets_db.py` |
+| Scoring vs realized returns; index + 5 naive benchmarks | ✅ `eval/` - hit rate, Brier, MAE, Sharpe, drawdown |
+| Ablations (RAG on/off, communication on/off, 1 agent vs 3) | ✅ `simulate.py ablate` |
+| Per-cycle JSONL run log + run report | ✅ `Agent persona/data/runs/` |
+| Intraday (15-minute) *backtesting* | ❌ live-only; no intraday price history |
 
-See `Agent persona/README.md` for the architecture and the CLI reference.
+See `Agent persona/README.md` for the architecture and `Agent persona/SIMULATION.md` for the
+simulation, benchmark and ablation reference.
 
 ## Retrieval
 
@@ -77,4 +90,4 @@ run from the repo root and do not need re-running.
 python -m pytest "Agent persona/tests" -q
 ```
 
-29 tests, no network required.
+119 tests, no network required.

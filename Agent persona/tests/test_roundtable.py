@@ -106,3 +106,22 @@ def test_baseline_agent_runs_without_network(digest, state):
     out = SentimentBaselineAgent().run(digest, state)
     assert out["forecasts"]
     assert {f["ticker"] for f in out["forecasts"]} == set(state["prices"])
+
+
+def test_baseline_agent_places_no_orders_on_a_mixed_digest(digest, state):
+    """One bullish and one bearish item nets to no view, so it should stand aside."""
+    assert SentimentBaselineAgent().run(digest, state)["orders"] == []
+
+
+def test_baseline_agent_emits_valid_order_records(digest, state):
+    """Its orders reach the venue directly, so they must satisfy the Order contract."""
+    decisive = {**digest, "news_digest": [
+        {**digest["news_digest"][0], "sentiment": "BEARISH", "confidence": 0.9}]}
+    out = SentimentBaselineAgent().run(decisive, state)
+    assert out["orders"]
+    for order in out["orders"]:
+        assert set(order) == {"ticker", "side", "qty", "order_type", "limit_price",
+                              "rationale", "news_refs"}
+        assert order["side"] in ("BUY", "SELL")
+        assert order["qty"] > 0
+        assert order["ticker"] in state["prices"]

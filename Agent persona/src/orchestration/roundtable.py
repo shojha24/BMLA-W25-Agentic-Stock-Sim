@@ -112,28 +112,34 @@ class Roundtable:
         state: State,
         peer_by_agent: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         prior_by_agent: Optional[Dict[str, AgentOutput]] = None,
+        state_by_agent: Optional[Dict[str, State]] = None,
     ) -> List[Dict[str, Any]]:
         jobs = [
             (
                 a,
+                # Each agent trades its own book, so each sees its own balance sheet.
+                (state_by_agent or {}).get(a.name, state),
                 (peer_by_agent or {}).get(a.name),
                 (prior_by_agent or {}).get(a.name),
             )
             for a in self.agents
         ]
         if not self.parallel or len(jobs) == 1:
-            return [_run_one(a, digest, state, peers, prior) for a, peers, prior in jobs]
+            return [_run_one(a, digest, st, peers, prior) for a, st, peers, prior in jobs]
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
-            futures = [pool.submit(_run_one, a, digest, state, peers, prior) for a, peers, prior in jobs]
+            futures = [pool.submit(_run_one, a, digest, st, peers, prior)
+                       for a, st, peers, prior in jobs]
             return [f.result() for f in futures]
 
-    def run(self, digest: Digest, state: State) -> Dict[str, Any]:
+    def run(self, digest: Digest, state: State,
+            state_by_agent: Optional[Dict[str, State]] = None) -> Dict[str, Any]:
+        """`state_by_agent` gives each agent its own book; `state` is the fallback."""
         timestamp = str(digest.get("timestamp", ""))
         rounds: List[Dict[str, Any]] = []
         errors: List[Dict[str, str]] = []
 
-        results = self._run_round(digest, state)
+        results = self._run_round(digest, state, state_by_agent=state_by_agent)
         outputs = [r["output"] for r in results if r["ok"]]
         errors += [{"agent": r["agent"], "error": r["error"]} for r in results if not r["ok"]]
         if not outputs:
@@ -153,7 +159,8 @@ class Roundtable:
                 a.name: [o for o in prev if str(o.get("agent_name")) != a.name]
                 for a in self.agents
             }
-            results = self._run_round(digest, state, peer_by_agent, prior_by_agent)
+            results = self._run_round(digest, state, peer_by_agent, prior_by_agent,
+                                      state_by_agent=state_by_agent)
             outputs = [r["output"] for r in results if r["ok"]]
             errors += [{"agent": r["agent"], "error": r["error"]} for r in results if not r["ok"]]
             if not outputs:

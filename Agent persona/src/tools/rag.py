@@ -78,7 +78,7 @@ class RAGNewsTool:
         self._loaded = True
 
         try:
-            import bm25s  # noqa: F401
+            import bm25s
             import Stemmer
         except Exception as exc:
             self._error = (
@@ -94,7 +94,6 @@ class RAGNewsTool:
             return
 
         try:
-            import bm25s
             # mmap=True mis-parses this corpus format on bm25s>=0.2, so load it in memory (~4s once).
             self._bm25 = bm25s.BM25.load(str(self.bm25_index_path), load_corpus=True)
             self._stemmer = Stemmer.Stemmer("english")
@@ -172,7 +171,7 @@ class RAGNewsTool:
 
     def _bm25_search(self, query: str, limit: int, cutoff_date: Optional[str],
                      stock_set: Optional[set]) -> List[Dict[str, Any]]:
-        import bm25s
+        import bm25s  # loaded lazily in _lazy_load; re-imported here for tokenize()
         tokens = bm25s.tokenize(query, stemmer=self._stemmer, show_progress=False)
         num_docs = int((getattr(self._bm25, "scores", None) or {}).get("num_docs") or OVERSAMPLE)
         k = max(min(OVERSAMPLE, num_docs), min(limit, num_docs))

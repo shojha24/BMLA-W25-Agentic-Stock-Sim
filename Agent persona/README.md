@@ -98,8 +98,24 @@ src/
 tests/                     29 tests, no network
 ```
 
+## Simulation
+
+The panel is one stage of a loop: news feed → digest → panel → consensus → scoring →
+portfolio. See `SIMULATION.md` for feeds, benchmarks, metrics, ablations and the CLI.
+
+```
+src/
+  simulate.py              backtest / live / ablate
+  data/    news_feed.py market_data.py digest_builder.py
+  sim/     portfolio.py execution.py engine.py actions_db.py assets_db.py
+  eval/    metrics.py benchmarks.py
+```
+
+Agents place real orders (`actions`) against their own books, filled by a market simulator
+that enforces cash, holdings, position caps and cooldowns. See `SIMULATION.md`.
+
 ## Not built yet
 
-Live news ingestion and the 15-minute clock, market data, the portfolio simulator, and
-benchmark scoring (SPY buy-and-hold, naive baselines, hit-rate / Brier / Sharpe).
-The forecast schema and the run output were shaped to feed those directly.
+Intraday backtesting (there is no minute-bar history behind the 15-minute live loop),
+borrow costs and slippage beyond a flat per-notional charge, and any news source past
+2020-06-11 for replay.

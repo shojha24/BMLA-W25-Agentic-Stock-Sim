@@ -48,6 +48,35 @@ class Forecast(TypedDict):
     news_refs: List[str]          # news_id / doc_id references
 
 
+class Order(TypedDict):
+    """An agent's actual trade instruction, not an opinion.
+
+    The whiteboard's {"Actions": ["Buy/Sell", "#Shares", "stock"]}, typed.
+    """
+    ticker: str
+    side: Literal["BUY", "SELL"]
+    qty: float                    # shares, always positive; `side` carries direction
+    order_type: Literal["MARKET", "LIMIT"]
+    limit_price: Optional[float]
+    rationale: str
+    news_refs: List[str]
+
+
+class Fill(TypedDict):
+    """What the market simulator did with an order."""
+    agent_id: str
+    timestamp: str
+    ticker: str
+    side: str
+    requested_qty: float
+    filled_qty: float
+    price: float                  # execution price, after slippage
+    notional: float               # signed: negative = cash out
+    cost: float
+    status: Literal["FILLED", "PARTIAL", "REJECTED"]
+    reason: str
+
+
 class AgentOutput(TypedDict):
     agent_name: str
     persona: str
@@ -56,6 +85,7 @@ class AgentOutput(TypedDict):
     market_view: Dict[str, Any]
     signals: List[Dict[str, Any]]
     forecasts: List[Forecast]
+    orders: List[Order]
     trade_ideas: List[Dict[str, Any]]
     checks: Dict[str, Any]
 

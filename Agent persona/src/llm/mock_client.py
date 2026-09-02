@@ -40,6 +40,28 @@ def _jitter(seed: str) -> float:
     return int(h[:8], 16) / 0xFFFFFFFF - 0.5
 
 
+def _mock_orders(forecasts, prices, positions, cash) -> List[Dict[str, Any]]:
+    """Turn the stub's forecasts into orders it can actually pay for."""
+    orders: List[Dict[str, Any]] = []
+    budget = cash * 0.5                     # never spend the whole book in one cycle
+    for f in sorted(forecasts, key=lambda x: -abs(x["expected_return_bps"])):
+        ticker = f["ticker"]
+        price = float(prices.get(ticker, 0.0) or 0.0)
+        if price <= 0 or f["direction"] == "FLAT":
+            continue
+        held = float((positions.get(ticker) or {}).get("qty", 0.0))
+        if f["direction"] == "UP":
+            qty = int(min(budget, cash * 0.2) // price)
+            if qty > 0:
+                orders.append({"side": "BUY", "ticker": ticker, "qty": qty,
+                               "rationale": f["rationale"], "news_refs": f["news_refs"]})
+                budget -= qty * price
+        elif held > 0:
+            orders.append({"side": "SELL", "ticker": ticker, "qty": int(held),
+                           "rationale": f["rationale"], "news_refs": f["news_refs"]})
+    return orders[:4]
+
+
 class MockChatClient:
     def __init__(self, horizon: str = "1d"):
         self.horizon = horizon
@@ -101,6 +123,11 @@ class MockChatClient:
                 "news_refs": refs,
             })
 
+        prices = state.get("prices") or {}
+        positions = state.get("positions") or {}
+        cash = float(state.get("cash_usd", 0.0) or 0.0)
+        actions = _mock_orders(forecasts, prices, positions, cash)
+
         regime = "RISK_ON" if view > 0.15 else ("RISK_OFF" if view < -0.15 else "NEUTRAL")
         return {
             "timestamp": timestamp,
@@ -122,6 +149,7 @@ class MockChatClient:
                 for i in digest[:8]
             ],
             "forecasts": forecasts,
+            "actions": actions,
             "trade_ideas": [
                 {
                     "ticker": f["ticker"],
